@@ -1,0 +1,271 @@
+namespace VbaLoop.Core;
+
+public enum ArtifactStatus { Ok, Missing, Drift }
+public enum ArtifactAction { Created, Overwritten, Unchanged, Migrated, Removed }
+
+/// <summary>
+/// init(온보딩 부트스트래퍼)의 순수 로직 (v1.1). 관리 아티팩트 8종을
+/// toml -> shim -> CLAUDE.md -> AGENTS.md -> 스킬 -> pitfall 참조 -> dist 참조 -> .gitignore 순으로 분석/수렴한다.
+/// Analyze가 기록할 내용까지 전부 준비하므로(추론 실패 시 여기서 throw)
+/// Apply는 부분 실행 없이 쓰기만 한다. Excel/세션 불필요.
+/// </summary>
+public static class Onboarding
+{
+    public sealed class Item
+    {
+        public required string Name { get; init; }          // 루트 기준 상대 표시 경로
+        public required string Path { get; init; }          // 절대 경로
+        public required ArtifactStatus Status { get; init; }
+        /// <summary>Status != Ok일 때 기록할 전체 텍스트(UTF-8 BOM 없음).</summary>
+        public string? NewContent { get; init; }
+        /// <summary>개명 이전: 기록 후 지울 옛 파일(vbaflow.toml). 내용은 NewContent로 옮긴다.</summary>
+        public string? MoveFrom { get; init; }
+        /// <summary>개명 이전: 지울 옛 관리 파일들(NewContent 없음). 비면 빈 폴더만 정리.</summary>
+        public IReadOnlyList<string>? DeleteFiles { get; init; }
+    }
+
+    /// <summary>8종 아티팩트 상태 + 기록 내용 준비. tomlPath가 null이면 워크북 추론으로
+    /// 스캐폴드를 준비하고, 추론 불가(0개/복수)면 CliError. 기존 toml 파싱 실패도 CliError
+    /// (사용자 소유 파일은 절대 덮어쓰지 않으므로 수렴 불가 = 에러).</summary>
+    public static List<Item> Analyze(string root, string? tomlPath,
+        IReadOnlyList<string> shimCanonicalLines, IReadOnlyList<string> docsBodyLines,
+        IReadOnlyList<string> skillCanonicalLines, IReadOnlyList<string> pitfallsCanonicalLines,
+        IReadOnlyList<string> distCanonicalLines)
+    {
+        var items = new List<Item>();
+        string srcRoot;
+
+        if (tomlPath != null && ProjectConfig.IsLegacyToml(tomlPath))
+        {
+            // 개명 전 설정: 내용 그대로 vbaloop.toml로 옮기고 옛 파일은 지운다(사용자 설정은 보존)
+            var cfg = ProjectConfig.Load(tomlPath, root);
+            srcRoot = cfg.SrcRoot;
+            items.Add(new Item
+            {
+                Name = "vbaloop.toml",
+                Path = System.IO.Path.Combine(root, "vbaloop.toml"),
+                Status = ArtifactStatus.Drift,
+                NewContent = CanonicalText.ReadFileStripBom(tomlPath),
+                MoveFrom = tomlPath,
+            });
+        }
+        else if (tomlPath != null)
+        {
+            var cfg = ProjectConfig.Load(tomlPath, root); // 파싱/스키마 검증, 실패 시 CliError 전파
+            srcRoot = cfg.SrcRoot;
+            items.Add(new Item { Name = "vbaloop.toml", Path = tomlPath, Status = ArtifactStatus.Ok });
+        }
+        else
+        {
+            srcRoot = System.IO.Path.Combine(root, "src");
+            var workbook = InferWorkbook(root);
+            items.Add(new Item
+            {
+                Name = "vbaloop.toml",
+                Path = System.IO.Path.Combine(root, "vbaloop.toml"),
+                Status = ArtifactStatus.Missing,
+                NewContent = BuildTomlScaffold(new DirectoryInfo(root).Name, workbook),
+            });
+        }
+
+        var shimPath = System.IO.Path.Combine(srcRoot, "LogShim.bas");
+        var shimStatus = !File.Exists(shimPath) ? ArtifactStatus.Missing
+            : IsWholeFileDrifted(shimPath, shimCanonicalLines) ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = System.IO.Path.GetRelativePath(root, shimPath),
+            Path = shimPath,
+            Status = shimStatus,
+            NewContent = shimStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(shimCanonicalLines),
+        });
+
+        foreach (var docName in new[] { "CLAUDE.md", "AGENTS.md" })
+        {
+            var docPath = System.IO.Path.Combine(root, docName);
+            string? existing = File.Exists(docPath) ? CanonicalText.ReadFileStripBom(docPath) : null;
+            var (newText, changed) = ManagedBlock.Upsert(existing, docsBodyLines);
+            var status = existing == null ? ArtifactStatus.Missing
+                : changed ? ArtifactStatus.Drift
+                : ArtifactStatus.Ok;
+            items.Add(new Item
+            {
+                Name = docName,
+                Path = docPath,
+                Status = status,
+                NewContent = status == ArtifactStatus.Ok ? null : newText,
+            });
+        }
+
+        // 워크플로우 스킬 (whole-file-owned, LogShim과 동일 패턴 — DESIGN §8 스킬 계층 결정)
+        var skillPath = System.IO.Path.Combine(root, ".claude", "skills", "vbaloop", "SKILL.md");
+        var skillStatus = !File.Exists(skillPath) ? ArtifactStatus.Missing
+            : IsWholeFileDrifted(skillPath, skillCanonicalLines) ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = System.IO.Path.GetRelativePath(root, skillPath),
+            Path = skillPath,
+            Status = skillStatus,
+            NewContent = skillStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(skillCanonicalLines),
+        });
+
+        // VBA pitfall 참조 (스킬 references/ 지연 로드 층, whole-file-owned).
+        // 정본은 vbaloop/assets — 축적은 정본에, 전파는 각 프로젝트의 init --check 드리프트 수렴으로.
+        var pitfallsPath = System.IO.Path.Combine(
+            root, ".claude", "skills", "vbaloop", "references", "vba-pitfalls.md");
+        var pitfallsStatus = !File.Exists(pitfallsPath) ? ArtifactStatus.Missing
+            : IsWholeFileDrifted(pitfallsPath, pitfallsCanonicalLines) ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = System.IO.Path.GetRelativePath(root, pitfallsPath),
+            Path = pitfallsPath,
+            Status = pitfallsStatus,
+            NewContent = pitfallsStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(pitfallsCanonicalLines),
+        });
+
+        // dist 참조 (스킬 references/ 지연 로드 층, whole-file-owned — pitfall과 동형).
+        // 배포는 편집 루프와 별개 태스크라 SKILL.md에서 분리해 상시 로드하지 않는다(DESIGN §8 스킬 계층).
+        var distPath = System.IO.Path.Combine(
+            root, ".claude", "skills", "vbaloop", "references", "dist.md");
+        var distStatus = !File.Exists(distPath) ? ArtifactStatus.Missing
+            : IsWholeFileDrifted(distPath, distCanonicalLines) ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = System.IO.Path.GetRelativePath(root, distPath),
+            Path = distPath,
+            Status = distStatus,
+            NewContent = distStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(distCanonicalLines),
+        });
+
+        // 개명 전 스킬 폴더(.claude\skills\vbaflow): vbaflow가 벤더링한 파일만 지우고, 사용자 파일이
+        // 남아 있으면 폴더는 보존한다. 새 스킬은 위의 vbaloop 경로에 이미 준비됐다.
+        var legacySkillDir = System.IO.Path.Combine(root, ".claude", "skills", LegacyNames.SkillDirName);
+        if (Directory.Exists(legacySkillDir))
+        {
+            var managed = LegacyNames.SkillFiles
+                .Select(f => System.IO.Path.Combine(legacySkillDir, f))
+                .Where(File.Exists)
+                .ToList();
+            bool emptyDir = !Directory.EnumerateFileSystemEntries(legacySkillDir, "*", SearchOption.AllDirectories)
+                .Any(e => File.Exists(e));
+            if (managed.Count > 0 || emptyDir)
+                items.Add(new Item
+                {
+                    Name = System.IO.Path.GetRelativePath(root, legacySkillDir) + " (legacy)",
+                    Path = legacySkillDir,
+                    Status = ArtifactStatus.Drift,
+                    DeleteFiles = managed,
+                });
+        }
+
+        // .gitignore 관리 블록 (사용자 소유 파일 부분 관리 — CLAUDE.md와 동형 upsert).
+        // dist 아티팩트/도구 스크래치(dist/, _dbg/)를 커밋 대상에서 제외(설계 §9.7).
+        var gitignorePath = System.IO.Path.Combine(root, ".gitignore");
+        string? gitignoreExisting = File.Exists(gitignorePath)
+            ? CanonicalText.ReadFileStripBom(gitignorePath) : null;
+        var (gitignoreText, gitignoreChanged) = GitignoreBlock.Upsert(gitignoreExisting, GitignoreBlock.ManagedLines);
+        var gitignoreStatus = gitignoreExisting == null ? ArtifactStatus.Missing
+            : gitignoreChanged ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = ".gitignore",
+            Path = gitignorePath,
+            Status = gitignoreStatus,
+            NewContent = gitignoreStatus == ArtifactStatus.Ok ? null : gitignoreText,
+        });
+
+        return items;
+    }
+
+    /// <summary>Analyze가 준비한 내용을 기록. Ok는 건드리지 않는다.</summary>
+    public static List<(Item Item, ArtifactAction Action)> Apply(List<Item> items)
+    {
+        var results = new List<(Item, ArtifactAction)>();
+        foreach (var item in items)
+        {
+            if (item.Status == ArtifactStatus.Ok)
+            {
+                results.Add((item, ArtifactAction.Unchanged));
+                continue;
+            }
+            if (item.DeleteFiles != null)
+            {
+                foreach (var f in item.DeleteFiles) File.Delete(f);
+                RemoveEmptyDirs(item.Path);
+                results.Add((item, ArtifactAction.Removed));
+                continue;
+            }
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(item.Path)!);
+            File.WriteAllText(item.Path, item.NewContent!, CanonicalText.Utf8NoBom);
+            if (item.MoveFrom != null)
+            {
+                File.Delete(item.MoveFrom); // 새 파일 기록 성공 뒤에만 옛 파일 삭제
+                results.Add((item, ArtifactAction.Migrated));
+                continue;
+            }
+            results.Add((item, item.Status == ArtifactStatus.Missing
+                ? ArtifactAction.Created : ArtifactAction.Overwritten));
+        }
+        return results;
+    }
+
+    /// <summary>하위부터 빈 폴더만 지운다(파일이 남은 폴더와 그 조상은 보존).</summary>
+    private static void RemoveEmptyDirs(string dir)
+    {
+        if (!Directory.Exists(dir)) return;
+        foreach (var sub in Directory.EnumerateDirectories(dir)) RemoveEmptyDirs(sub);
+        if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+    }
+
+    /// <summary>루트 최상위의 *.xlsm 중 Excel 잠금 스텁(~$*)을 제외하고 정확히 1개를 요구.</summary>
+    public static string InferWorkbook(string root)
+    {
+        var candidates = Directory.EnumerateFiles(root, "*.xlsm", SearchOption.TopDirectoryOnly)
+            .Select(System.IO.Path.GetFileName)
+            .Where(n => n != null && !n.StartsWith("~$"))
+            .Select(n => n!)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return candidates.Count switch
+        {
+            1 => candidates[0],
+            0 => throw new CliError($"워크북(*.xlsm)을 찾지 못함: {root}",
+                "vbaloop.toml 수동 생성 후 vbaloop init 재실행"),
+            _ => throw new CliError($"워크북 후보가 복수임: {string.Join(", ", candidates)}",
+                "vbaloop.toml 수동 생성 후 vbaloop init 재실행"),
+        };
+    }
+
+    public static string BuildTomlScaffold(string projectName, string workbookFileName)
+    {
+        var lines = new[]
+        {
+            "[project]",
+            $"name = \"{projectName}\"",
+            "",
+            "[excel]",
+            $"workbook = \"{workbookFileName}\"",
+            "visible = true",
+            "",
+            "[src]",
+            "root = \"src\"",
+        };
+        return CanonicalText.ToCanonical(lines);
+    }
+
+    /// <summary>정규화(BOM/개행/후행 공백/끝 빈 줄 무시) 후 라인 시퀀스 ordinal 비교.
+    /// whole-file-owned 아티팩트(LogShim/스킬) 공용 드리프트 판정.</summary>
+    public static bool IsWholeFileDrifted(string filePath, IReadOnlyList<string> canonicalLines)
+    {
+        var actual = NormalizeForCompare(CanonicalText.SplitLines(CanonicalText.ReadFileStripBom(filePath)));
+        var expected = NormalizeForCompare(canonicalLines);
+        return !actual.SequenceEqual(expected, StringComparer.Ordinal);
+    }
+
+    private static string[] NormalizeForCompare(IReadOnlyList<string> lines)
+        => CanonicalText.TrimTrailingEmpty(lines.Select(l => l.TrimEnd()).ToArray());
+}

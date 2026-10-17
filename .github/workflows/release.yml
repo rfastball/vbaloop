@@ -1,0 +1,151 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+# 기본은 읽기 전용. 쓰기 권한은 필요한 잡에만 준다 — 빌드/테스트/퍼블리시가 도는 잡은
+# 릴리스를 만들 수 없고, 릴리스를 만드는 잡은 소스를 빌드하지 않는다.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write        # 아티팩트 출처 증명(attestation) 서명
+      attestations: write
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
+      zip: ${{ steps.pkg.outputs.zip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # 태그 이름은 공격자가 고를 수 있는 입력이다 — 셸 스크립트에 ${{ }}로 직접 끼워 넣지 않고
+      # env로만 넘긴다. 검증은 semver 전체를 앵커링해, 이후 단계가 쓰는 version 출력값이
+      # 안전한 문자 집합([0-9A-Za-z.-])만 갖도록 보장한다. 빌드 메타데이터(+...)는 받지 않는다 —
+      # SDK가 InformationalVersion의 +rev와 합쳐 버려 스모크 대조가 깨진다.
+      # '-'가 있으면(v1.2.3-rc.1) prerelease — /releases/latest와 install.ps1 기본값에서 빠진다.
+      - name: Resolve version from tag
+        id: ver
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $v = $env:TAG -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            Write-Error "태그가 semver가 아님: '$env:TAG' (예: v1.2.3, v1.2.3-rc.1)"
+            exit 1
+          }
+          $pre = if ($v.Contains('-')) { 'true' } else { 'false' }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "prerelease=$pre" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "release version = $v (prerelease=$pre)"
+
+      - name: Test
+        run: dotnet test -c Release
+
+      # self-contained: 받는 사용자가 .NET 런타임을 따로 깔지 않아도 되게 한다.
+      # dynamic(Excel COM 늦은 바인딩)을 쓰므로 트리밍/AOT는 불가 — 비트리밍 단일 파일.
+      - name: Publish
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          dotnet publish src\VbaLoop -c Release -r win-x64 `
+            -p:Version=$env:VERSION `
+            -p:SelfContained=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o publish
+
+      - name: Smoke test
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $out = .\publish\vbaloop.exe version
+          $out
+          if ($LASTEXITCODE -ne 0) { throw "vbaloop version 실패" }
+          if (-not ($out -join "`n").Contains($env:VERSION)) {
+            throw "빌드된 exe가 태그 버전을 보고하지 않음"
+          }
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $v = $env:VERSION
+          $stage = "stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item publish\vbaloop.exe $stage
+          Copy-Item LICENSE, README.md, THIRD_PARTY_NOTICES.md, SECURITY.md $stage
+          $zip = "vbaloop-$v-win-x64.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+          # exe 단독 다운로드 경로도 함께 제공한다 — install.ps1이 exe를 받고,
+          # 직접 받는 사용자는 exe 하나만 받아 더블클릭하면 마법사로 들어간다.
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Move-Item $zip dist\
+          Copy-Item publish\vbaloop.exe dist\vbaloop.exe
+          Push-Location dist
+          (Get-FileHash $zip, 'vbaloop.exe' -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) }
+          ) | Set-Content -Path checksums.txt -Encoding ascii
+          Get-Content checksums.txt
+          Pop-Location
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/${{ steps.pkg.outputs.zip }}
+            dist/vbaloop.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # 릴리스 생성만 하는 잡: contents: write는 여기에만. 체크아웃·빌드 없음 —
+  # 위 잡이 검증·증명한 자산을 그대로 올린다.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          ZIP: ${{ needs.build.outputs.zip }}
+        run: |
+          set -euo pipefail
+          args=(--title "vbaloop $VERSION" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "dist/$ZIP" dist/vbaloop.exe dist/checksums.txt "${args[@]}"

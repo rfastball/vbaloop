@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>vbaloop</AssemblyName>
+    <RootNamespace>VbaLoop</RootNamespace>
+    <!-- 로컬/개발 빌드 기본값. 릴리스는 태그에서 주입한다(-p:Version=1.2.3) —
+         InformationalVersion이 "<Version>+<git rev>"가 되어 vbaloop version이 둘 다 읽는다. -->
+    <Version>0.1.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- publish: dotnet publish -c Release -r win-x64 => single exe.
+         기본은 framework-dependent(개발 루프가 빠르다). 릴리스 아티팩트는 워크플로가
+         -p:SelfContained=true로 덮어쓴다 — "받아서 실행"이 첫 동작이라 .NET 런타임
+         설치 안내가 튀어나오면 배포 구상 자체가 깨진다. -->
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
+  <!-- git describe를 SourceRevisionId로 주입 -> InformationalVersion "1.0.0+<rev>"
+       (vbaloop version이 판독). -dirty 접미 = 미커밋 소스 빌드. git 실패 시 nogit 폴백. -->
+  <Target Name="StampGitRevision" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+    <Exec Command="git describe --always --dirty" ConsoleToMSBuild="true"
+          IgnoreExitCode="true" StandardOutputImportance="low"
+          WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitRevision" />
+      <Output TaskParameter="ExitCode" PropertyName="GitExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <GitRevision Condition="'$(GitExitCode)' != '0' Or '$(GitRevision)' == ''">nogit</GitRevision>
+      <SourceRevisionId>$(GitRevision)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
+  <!-- init(온보딩 부트스트래퍼)이 벤더링하는 정본 자산 -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\LogShim.bas" LogicalName="VbaLoop.assets.LogShim.bas" />
+    <EmbeddedResource Include="..\..\assets\AgentDocsBlock.md" LogicalName="VbaLoop.assets.AgentDocsBlock.md" />
+    <EmbeddedResource Include="..\..\assets\vbaloop-skill\SKILL.md" LogicalName="VbaLoop.assets.SkillMd" />
+    <EmbeddedResource Include="..\..\assets\vbaloop-skill\references\vba-pitfalls.md" LogicalName="VbaLoop.assets.PitfallsMd" />
+    <EmbeddedResource Include="..\..\assets\vbaloop-skill\references\dist.md" LogicalName="VbaLoop.assets.DistMd" />
+  </ItemGroup>
+
+</Project>

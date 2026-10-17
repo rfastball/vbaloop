@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+_dbg/
+
+# local pilot workbooks and copies (never commit real workbooks)
+/_pilot_form/
+/*.xlsm
+/*.xlsb
+/*.xlam

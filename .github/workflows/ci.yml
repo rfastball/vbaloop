@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [master, 'claude/**']
+  pull_request:
+    branches: [master]
+
+# net10.0-windows 타깃이라 러너는 Windows여야 한다. 단위 테스트는 Excel/COM 불필요
+# (헤더/toml/CP949 가드 등 순수 판정)라 Excel 없는 러너에서 그대로 돈다.
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # csproj의 StampGitRevision이 git describe를 쓴다
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        run: dotnet test -c Release --no-build --verbosity normal
+
+      - name: Publish smoke (self-contained single file)
+        run: |
+          dotnet publish src\VbaLoop -c Release -r win-x64 `
+            -p:SelfContained=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish-smoke
+          # 릴리스와 같은 형태의 산출물이 실제로 기동하는지 확인한다.
+          # version은 Excel도 프로젝트도 필요 없어 CI에서 부를 수 있는 유일한 명령이다.
+          .\publish-smoke\vbaloop.exe version

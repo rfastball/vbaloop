@@ -1,0 +1,5 @@
+# VBA 소스는 항상 CRLF로 체크아웃 (임베디드 자산이 벤더링 원본이 되므로 결정성 필수)
+*.bas text eol=crlf
+*.cls text eol=crlf
+*.frm text eol=crlf
+*.frx binary
