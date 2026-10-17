@@ -135,4 +135,25 @@ public class CliArgsTests
     [Fact]
     public void Parse_SkipCompile()
         => Assert.True(CliArgs.Parse(new[] { "--skip-compile" }).SkipCompile);
+
+    [Fact]
+    public void Parse_SetupWorkbookAndNew()
+    {
+        var wb = CliArgs.Parse(new[] { "--workbook", @"C:\work\Book.xlsm", "--folder", @"D:\dev\Book" });
+        Assert.Equal(@"C:\work\Book.xlsm", wb.Workbook);
+        Assert.Equal(@"D:\dev\Book", wb.Folder);
+        Assert.Equal("MyTool", CliArgs.Parse(new[] { "--new", "MyTool" }).NewName);
+    }
+
+    [Theory]
+    [InlineData("--workbook")]
+    [InlineData("--new")]
+    public void Parse_SetupValueOption_MissingValue_Throws(string opt)
+        => Assert.Throws<VbaLoop.Core.CliError>(() => CliArgs.Parse(new[] { opt }));
+
+    [Theory]
+    [InlineData("--workbook")]
+    [InlineData("--new")]
+    public void RawArgsRequestJson_SetupValueOption_ConsumesValue(string opt)
+        => Assert.False(CliArgs.RawArgsRequestJson(new[] { "setup", opt, "--json" }));
 }

@@ -40,21 +40,32 @@ irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex
 
 ## 시작하기
 
+**기존 워크북**: `.xlsm`을 `vbaloop.exe` 위로 끌어다 놓는다.
+원본은 그대로 두고, 원본 옆에 `<워크북이름>\` 폴더를 만들어 사본을 넣은 뒤 코드를 `src\`로 꺼낸다.
+
+**새 프로젝트**: `vbaloop.exe`를 더블클릭하고 "기존 워크북을 가져올까요?"에 `n`, 이어서 이름만 입력한다.
+`%USERPROFILE%\vbaloop-projects\<이름>\`에 워크북과 샘플 테스트를 만들고 통과하는 것까지 확인한다.
+
+어느 쪽이든 마지막에 "Claude Code를 새 창으로 열까요?"에 Enter를 누르면 그 폴더에서 바로 시작한다.
+에이전트는 관리 블록과 스킬을 읽고 편집 → push → test 루프를 돈다.
+
+셸에서는 같은 일을 이렇게 한다.
+
 ```powershell
-vbaloop setup
+vbaloop setup --workbook C:\work\정산.xlsm    # 기존 워크북 → C:\work\정산\ 에 사본
+vbaloop setup --new MyTool                     # 새 프로젝트 → .\MyTool\
+vbaloop setup --folder C:\work\MyVba           # 준비해 둔 폴더(워크북 0~1개)를 그대로 사용
 ```
 
-환경 점검 → AccessVBOM → 설치 → 프로젝트 폴더 선택 → 워크북 생성 또는 채택 → `init` → 검증 순으로 진행한다.
-신규 프로젝트는 샘플 테스트가 통과하는 것까지, 기존 워크북은 코드를 `src\`로 꺼내는 것까지 한다.
-비대화형: `vbaloop setup --folder C:\work\MyVba --yes`.
-
-그다음 그 폴더에서 코드 에이전트를 실행하면 된다. 에이전트는 관리 블록과 스킬을 읽고 편집 → push → test 루프를 돈다.
+- 사본 폴더 이름이 이미 쓰이고 있으면 `<이름> (2)`처럼 비어 있는 이름을 쓴다. 다시 실행하면 이전에 만든 폴더를 재사용한다.
+- 사본을 둘 곳을 직접 정하려면 `--workbook <경로> --folder <폴더>`.
+- `--yes`를 붙이면 묻지 않고 진행한다(Claude Code 실행 제안도 생략).
 
 ## 명령
 
 | 명령 | 설명 |
 |---|---|
-| `setup` | 개발환경 마법사(유일한 대화형 명령) |
+| `setup [--workbook <xlsm> \| --new <이름> \| --folder <경로>]` | 개발환경 마법사(유일한 대화형 명령) |
 | `init [--check]` | 관리 파일 설치·갱신. `--check`는 검사만 |
 | `doctor [--fix] [--kill-orphans]` | 환경 점검. `--fix`는 AccessVBOM 켜기, `--kill-orphans`는 창 없는 자동화 Excel 정리(먼저 `doctor`로 대상 확인) |
 | `status` | 세션 상태와 src 동기화 여부 |

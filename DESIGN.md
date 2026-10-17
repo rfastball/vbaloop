@@ -193,6 +193,15 @@ cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프�
 - **10.2** `setup`: 환경 점검 → AccessVBOM(동의 후) → `%LOCALAPPDATA%\vbaloop\bin` 설치 + 사용자 PATH →
   폴더 선택 → 워크북 생성 또는 채택 → `init` → 검증(신규는 push+test 초록불, 기존은 pull).
   `--folder <경로> --yes`면 비대화형이다. exe를 더블클릭하면 setup으로 진입한다.
+  - 시작점은 셋 중 하나다. 기존 워크북(`--workbook`, exe에 드래그 앤 드롭, 파일 선택), 새 프로젝트(`--new <이름>`),
+    준비된 폴더(`--folder`). 인자 없는 대화형 실행은 앞의 둘 중 하나를 묻고, 비우면 폴더 선택으로 간다.
+  - 기존 워크북은 원본을 건드리지 않는다. 원본 옆 `<이름>\`에 사본을 만든다(읽기 전용 특성 해제). 그 이름이
+    남의 폴더면 `<이름> (2)`…를 쓰고, 이전 setup의 흔적(같은 워크북을 가리키는 toml, 또는 원본과 같은 사본)이
+    있으면 재사용해 재실행이 멱등이다. 원본이 이미 프로젝트 안에 있으면 그 자리에서 쓴다.
+  - 새 프로젝트의 부모 폴더는 셸에서는 cwd, 더블클릭이면 `%USERPROFILE%\vbaloop-projects`다. 더블클릭의 cwd는
+    exe 위치라 의미가 없고, 문서·바탕화면은 OneDrive로 리디렉션되기 쉬워 피한다.
+  - 대화형이고 PATH에 claude가 있으면 끝에서 그 폴더에 `cmd /k claude` 새 창을 띄울지 묻는다. 마법사가 claude를
+    자식으로 기다리지 않는 것은 Excel RCW를 쥔 채 살아 있지 않기 위해서다.
 - **10.3** 릴리스 exe는 self-contained 단일 파일이다(런타임 설치 불필요). Excel COM을 늦은 바인딩으로 쓰므로
   트리밍·AOT는 하지 않는다.
 - **10.4** 릴리스: `v*` 태그 → 테스트 → publish → 스모크 → zip/exe/checksums → attestation → GitHub Release.

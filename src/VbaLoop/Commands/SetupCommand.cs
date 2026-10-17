@@ -6,7 +6,9 @@ namespace VbaLoop.Commands;
 
 /// <summary>
 /// vbaloop setup — 사람이 생애 1회 쓰는 개발환경 마법사. 배포본을 받아 실행하면 환경 점검 →
-/// AccessVBOM → 자기설치(PATH) → 폴더 선택 → 워크북 → 하네스 → 검증까지 한 번에 세운다.
+/// AccessVBOM → 자기설치(PATH) → 워크북/폴더 선택 → 워크북 → 하네스 → 검증까지 한 번에 세운다.
+/// 기존 워크북은 exe에 끌어다 놓거나 --workbook으로 넘기면 원본 옆 사본 폴더에서 시작하고,
+/// 대화형이면 끝에서 그 폴더에 Claude Code를 띄워 준다.
 ///
 /// 이 명령만 대화형이다. 에이전트가 부르는 나머지 CLI 표면은 전부 비대화형 --json이며,
 /// 여기서도 --folder/--yes를 주면 프롬프트 없이 끝까지 진행한다(스크립트 설치 경로).
@@ -26,6 +28,20 @@ public static class SetupCommand
 
         // --install-only는 프로젝트를 건드리지 않고 설치까지만 — 단계 표시도 거기서 끝난다
         int total = opts.InstallOnly ? 3 : 6;
+
+        // 시작점은 하나만: 기존 워크북(--workbook) / 새 프로젝트(--new) / 준비된 폴더(--folder).
+        // --workbook + --folder만 예외로 허용한다(사본을 둘 폴더 지정). 환경 점검 전에 거른다.
+        if (opts.NewName != null && (opts.Workbook != null || opts.Folder != null))
+        {
+            o.Fail("--new는 --workbook·--folder와 함께 쓸 수 없음",
+                "새 프로젝트: vbaloop setup --new <이름> (cwd 아래 생성) / 기존 워크북: vbaloop setup --workbook <경로.xlsm>");
+            return o;
+        }
+        // 잘못 끌어다 놓은 파일·쓸 수 없는 이름은 설치·AccessVBOM 변경 전에 거른다(CliError → 봉투)
+        string? givenWorkbook = opts.Workbook != null ? WorkbookIntake.Validate(opts.Workbook) : null;
+        string? givenNewFolder = opts.NewName != null
+            ? NewProjectFolder.Resolve(Environment.CurrentDirectory, opts.NewName)
+            : null;
 
         Say(opts.InstallOnly ? "vbaloop setup --install-only — exe 설치/갱신" : "vbaloop setup — 개발환경 마법사");
         Say();
@@ -121,31 +137,67 @@ public static class SetupCommand
         }
 
         // ── [4/6] 프로젝트 폴더 ─────────────────────────────────────────
+        // 기존 워크북을 받으면(드래그 앤 드롭/--workbook/파일 선택) 폴더는 도구가 정한다 —
+        // 사용자가 빈 폴더를 만들어 워크북을 혼자 넣어 두는 준비 단계를 없앤다(원본은 불변).
         Say();
         Say("[4/6] 프로젝트 폴더");
-        string? folder = ResolveFolder(opts, Say);
-        if (folder == null)
+        var (workbookArg, newFolder) = givenNewFolder != null || givenWorkbook != null
+            ? (givenWorkbook, givenNewFolder)
+            : ChooseStart(opts, Say);
+        string folder;
+        string? intakeWorkbook = null;
+        WorkbookIntake.Kind? intakeKind = null;
+        if (newFolder != null)
         {
-            o.Fail("프로젝트 폴더가 지정되지 않음", "vbaloop setup --folder <경로>");
-            return o;
+            folder = newFolder;
+            Directory.CreateDirectory(folder);
+            Say("  ok   새 프로젝트 폴더를 만들었습니다");
         }
-        folder = Path.GetFullPath(folder);
-        Directory.CreateDirectory(folder);
+        else if (workbookArg != null)
+        {
+            string source = WorkbookIntake.Validate(workbookArg);
+            var plan = WorkbookIntake.Decide(source, opts.Folder);
+            WorkbookIntake.Execute(plan);
+            folder = plan.Folder;
+            intakeWorkbook = plan.WorkbookName;
+            intakeKind = plan.Kind;
+            Say($"  원본: {source}");
+            Say(plan.Kind switch
+            {
+                WorkbookIntake.Kind.Copy => "  ok   사본을 만들었습니다 (원본은 그대로 둡니다)",
+                WorkbookIntake.Kind.Reuse => "  ok   이전에 만든 개발 폴더를 재사용합니다 (원본의 이후 변경은 반영되지 않음)",
+                _ => "  ok   이미 vbaloop 프로젝트 안의 워크북입니다 — 그 자리에서 사용합니다",
+            });
+        }
+        else
+        {
+            string? picked = ResolveFolder(opts, Say);
+            if (picked == null)
+            {
+                o.Fail("프로젝트 폴더가 지정되지 않음",
+                    "vbaloop setup --workbook <경로.xlsm> 또는 vbaloop setup --folder <경로>");
+                return o;
+            }
+            folder = Path.GetFullPath(picked);
+            Directory.CreateDirectory(folder);
+        }
         Say($"  → {folder}");
 
         // ── [5/6] 워크북 + 하네스 ───────────────────────────────────────
         Say();
         Say("[5/6] 워크북 + 하네스");
-        var existing = Directory.EnumerateFiles(folder, "*.xlsm", SearchOption.TopDirectoryOnly)
-            .Select(Path.GetFileName)
-            .Where(n => n != null && !n.StartsWith("~$"))
-            .Select(n => n!)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var existing = intakeWorkbook != null
+            ? new List<string> { intakeWorkbook } // Decide가 폴더 안의 대상을 이미 하나로 확정했다
+            : Directory.EnumerateFiles(folder, "*.xlsm", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(n => n != null && !n.StartsWith("~$"))
+                .Select(n => n!)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         if (existing.Count > 1)
         {
             o.Fail($"워크북 후보가 복수임: {string.Join(", ", existing)}",
-                "대상 워크북 하나만 남기거나, vbaloop.toml을 수동 작성한 뒤 vbaloop init 실행");
+                "가져올 워크북을 지정: vbaloop setup --workbook <경로.xlsm> (원본 옆 새 폴더에 사본을 만든다)");
             return o;
         }
 
@@ -264,10 +316,26 @@ public static class SetupCommand
                 Say("        .claude\\skills\\vbaloop\\SKILL.md는 사용되지 않습니다(AGENTS.md는 유효).");
             }
 
+            // 마지막 관문(폴더 찾아가서 claude 실행)까지 마법사가 대신한다 — 대화형에서만 묻는다
+            bool claudeLaunched = false;
+            if (claudeCli && !opts.Yes && !opts.Json && ConsoleHost.CanPrompt)
+            {
+                Say();
+                if (ConsoleHost.Confirm("지금 이 폴더에서 Claude Code를 새 창으로 열까요?", defaultYes: true, fallback: false))
+                {
+                    string? launchError = LaunchClaude(folder);
+                    claudeLaunched = launchError == null;
+                    Say(claudeLaunched
+                        ? "  ok   Claude Code 창을 열었습니다. 예: \"Test_로 시작하는 테스트를 하나 만들고 돌려줘\""
+                        : $"  FAIL Claude Code 실행 실패: {launchError} — 위 안내대로 직접 실행하세요");
+                }
+            }
+
             o.Payload = new
             {
                 folder,
                 workbook = workbookName,
+                intake = intakeKind?.ToString().ToLowerInvariant(),
                 createdWorkbook = isNew,
                 sample = sampleWritten,
                 accessVbomFixed = vbomFixed,
@@ -277,6 +345,7 @@ public static class SetupCommand
                 pathAdded,
                 verify,
                 claudeCli,
+                claudeLaunched,
                 repo = RepoUrl,
             };
             return o;
@@ -284,6 +353,43 @@ public static class SetupCommand
         finally
         {
             Environment.CurrentDirectory = prevCwd;
+        }
+    }
+
+    /// <summary>
+    /// 대화형 시작점 선택(--workbook·--new·--folder가 모두 없을 때만). 반환은 (가져올 워크북, 새 프로젝트
+    /// 폴더) 중 하나, 둘 다 null이면 준비된 폴더 흐름(ResolveFolder)으로 간다.
+    /// <list type="bullet">
+    /// <item>기존 워크북: 파일 선택 대화상자, 취소하면 콘솔 경로 입력(창에 파일을 끌어다 놓으면 입력됨)</item>
+    /// <item>새 프로젝트: 이름만 받는다. 부모는 더블클릭이면 %USERPROFILE%\vbaloop-projects, 셸이면 cwd</item>
+    /// </list>
+    /// </summary>
+    private static (string? Workbook, string? NewFolder) ChooseStart(CliArgs opts, Action<string> say)
+    {
+        if (opts.Folder != null || opts.Yes || opts.Json || !ConsoleHost.CanPrompt) return (null, null);
+
+        if (ConsoleHost.Confirm("  기존 워크북(.xlsm)을 가져올까요? (n = 새 빈 프로젝트)", defaultYes: true, fallback: false))
+        {
+            say("  파일 선택 대화상자를 엽니다 (원본은 그대로 두고 옆에 사본 폴더를 만듭니다)");
+            string? picked = FilePicker.PickWorkbook("vbaloop로 가져올 워크북(.xlsm)을 고르세요")
+                ?? ConsoleHost.Ask("  워크북 경로 (이 창에 파일을 끌어다 놓아도 됨, 빈 줄 = 폴더 직접 선택):");
+            return (picked, null);
+        }
+
+        string parent = ConsoleHost.IsOwnConsole() ? NewProjectFolder.ExplorerDefaultParent : Environment.CurrentDirectory;
+        say($"  새 프로젝트는 {parent}\\<이름> 에 만듭니다");
+        while (true)
+        {
+            string? name = ConsoleHost.Ask("  프로젝트 이름 (빈 줄 = 준비된 폴더 직접 선택):");
+            if (name == null) return (null, null);
+            try
+            {
+                return (null, NewProjectFolder.Resolve(parent, name));
+            }
+            catch (CliError e)
+            {
+                say($"  FAIL {e.Message}" + (e.Hint != null ? $" — {e.Hint}" : ""));
+            }
         }
     }
 
@@ -301,7 +407,7 @@ public static class SetupCommand
         return picked ?? ConsoleHost.Ask("  프로젝트 폴더 경로:");
     }
 
-    /// <summary>PATH에서 claude 실행 파일을 찾는다 — 안내 문구 분기용(실패해도 setup은 성공).</summary>
+    /// <summary>PATH에서 claude 실행 파일을 찾는다 — 안내 문구 분기·실행 제안용(실패해도 setup은 성공).</summary>
     private static bool HasClaudeCli()
     {
         string[] names = { "claude.exe", "claude.cmd", "claude.bat" };
@@ -316,5 +422,39 @@ public static class SetupCommand
             catch { /* 잘못된 PATH 항목 무시 */ }
         }
         return false;
+    }
+
+    /// <summary>
+    /// 프로젝트 폴더에서 새 콘솔 창으로 Claude Code를 띄운다. <c>cmd /k</c>를 거치는 이유:
+    /// npm 설치본은 claude.cmd라 직접 실행할 수 없고, claude가 끝나도 창이 남아 이어서 쓸 수 있다.
+    /// 셸 실행(ShellExecute)은 이 프로세스의 환경을 물려주므로, 방금 PATH에 넣은 설치 폴더도
+    /// 새 창에서 바로 보인다(SelfInstall.EnsureOnPath가 현재 프로세스 PATH도 갱신).
+    /// 마법사가 claude를 자식으로 붙잡고 기다리지 않는다 — Excel RCW를 쥔 채 세션 내내 살아 있게 된다.
+    /// </summary>
+    private static string? LaunchClaude(string folder)
+    {
+        try
+        {
+            // PATH가 레지스트리엔 있어도 이 프로세스가 그 전에 시작됐으면 빠져 있다 — 새 창에서
+            // 에이전트가 vbaloop를 못 찾지 않게 설치본이 있으면 현재 프로세스 PATH에 보장한다
+            if (File.Exists(SelfInstall.InstalledExePath))
+            {
+                var (live, changed) = SelfInstall.AddToPathValue(
+                    Environment.GetEnvironmentVariable("Path"), SelfInstall.InstallDir);
+                if (changed) Environment.SetEnvironmentVariable("Path", live);
+            }
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/k claude",
+                WorkingDirectory = folder,
+                UseShellExecute = true,
+            });
+            return null;
+        }
+        catch (Exception e)
+        {
+            return e.Message;
+        }
     }
 }

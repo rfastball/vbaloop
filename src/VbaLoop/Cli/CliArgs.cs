@@ -34,6 +34,11 @@ public sealed class CliArgs
     public bool StripComments { get; private set; }
     /// <summary>setup 전용: 대상 프로젝트 폴더(생략 시 폴더 선택 대화상자).</summary>
     public string? Folder { get; private set; }
+    /// <summary>setup 전용: 가져올 기존 워크북(.xlsm). 원본 옆 &lt;이름&gt;\ 폴더에 사본을 만들어
+    /// 프로젝트로 쓴다(--folder를 주면 그 폴더). exe에 워크북을 드래그 앤 드롭한 경우도 이것으로 온다.</summary>
+    public string? Workbook { get; private set; }
+    /// <summary>setup 전용: 새 빈 프로젝트 이름. cwd 아래 &lt;이름&gt;\ 폴더에 &lt;이름&gt;.xlsm과 샘플 테스트를 만든다.</summary>
+    public string? NewName { get; private set; }
     /// <summary>setup/doctor 전용: 확인 프롬프트를 묻지 않고 승인으로 진행(비대화형 설치).</summary>
     public bool Yes { get; private set; }
     /// <summary>setup 전용: 마지막 push/test(또는 pull) 검증 단계를 건너뛴다 — Excel 불필요.</summary>
@@ -116,10 +121,18 @@ public sealed class CliArgs
                     if (++i >= args.Length) throw new CliError("--folder 뒤에 경로 필요");
                     r.Folder = args[i];
                     break;
+                case "--workbook":
+                    if (++i >= args.Length) throw new CliError("--workbook 뒤에 .xlsm 경로 필요");
+                    r.Workbook = args[i];
+                    break;
+                case "--new":
+                    if (++i >= args.Length) throw new CliError("--new 뒤에 프로젝트 이름 필요");
+                    r.NewName = args[i];
+                    break;
                 default:
                     if (args[i].StartsWith('-'))
                         throw new CliError($"미지 옵션: {args[i]}",
-                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --strip-comments");
+                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --workbook <경로> --new <이름> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }
@@ -142,7 +155,7 @@ public sealed class CliArgs
                 case "--json":
                     return true;
                 case "--timeout" or "--config" or "--runid" or "--macro" or "--module"
-                    or "--out" or "--bootstrap" or "--folder" or "--backup":
+                    or "--out" or "--bootstrap" or "--folder" or "--workbook" or "--new" or "--backup":
                     i++; // 다음 토큰은 이 옵션의 값
                     break;
             }
