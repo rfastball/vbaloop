@@ -6,7 +6,7 @@ namespace VbaLoop.Core;
 public enum IdentityState { Gone, Match, Unknown }
 
 /// <summary>
-/// (PID, StartTime) 기반 프로세스 생존 판정. vh-core.ps1 Test-AgentProcessAlive 이식:
+/// (PID, StartTime) 기반 프로세스 생존 판정.
 /// StartTime이 비어 있으면 PID만 신뢰, 읽기 실패 시 살아있다고 가정(보수적).
 /// </summary>
 public static class ProcessIdentity

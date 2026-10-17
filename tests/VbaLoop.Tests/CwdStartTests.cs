@@ -54,13 +54,11 @@ public class CwdStartTests
         Assert.False(s.IsEmpty);
     }
 
-    [Theory]
-    [InlineData("vbaloop.toml")]
-    [InlineData("vbaflow.toml")]
-    public void Toml_IsProject(string toml)
+    [Fact]
+    public void Toml_IsProject()
     {
         using var t = new TempDir();
-        t.File(toml);
+        t.File("vbaloop.toml");
         Assert.True(CwdStart.Inspect(t.Path).IsProject);
     }
 

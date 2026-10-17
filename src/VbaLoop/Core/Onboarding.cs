@@ -1,7 +1,7 @@
 namespace VbaLoop.Core;
 
 public enum ArtifactStatus { Ok, Missing, Drift }
-public enum ArtifactAction { Created, Overwritten, Unchanged, Migrated, Removed }
+public enum ArtifactAction { Created, Overwritten, Unchanged }
 
 /// <summary>
 /// init(온보딩 부트스트래퍼)의 순수 로직 (v1.1). 관리 아티팩트 8종을
@@ -18,10 +18,6 @@ public static class Onboarding
         public required ArtifactStatus Status { get; init; }
         /// <summary>Status != Ok일 때 기록할 전체 텍스트(UTF-8 BOM 없음).</summary>
         public string? NewContent { get; init; }
-        /// <summary>개명 이전: 기록 후 지울 옛 파일(vbaflow.toml). 내용은 NewContent로 옮긴다.</summary>
-        public string? MoveFrom { get; init; }
-        /// <summary>개명 이전: 지울 옛 관리 파일들(NewContent 없음). 비면 빈 폴더만 정리.</summary>
-        public IReadOnlyList<string>? DeleteFiles { get; init; }
     }
 
     /// <summary>8종 아티팩트 상태 + 기록 내용 준비. tomlPath가 null이면 워크북 추론으로
@@ -35,21 +31,7 @@ public static class Onboarding
         var items = new List<Item>();
         string srcRoot;
 
-        if (tomlPath != null && ProjectConfig.IsLegacyToml(tomlPath))
-        {
-            // 개명 전 설정: 내용 그대로 vbaloop.toml로 옮기고 옛 파일은 지운다(사용자 설정은 보존)
-            var cfg = ProjectConfig.Load(tomlPath, root);
-            srcRoot = cfg.SrcRoot;
-            items.Add(new Item
-            {
-                Name = "vbaloop.toml",
-                Path = System.IO.Path.Combine(root, "vbaloop.toml"),
-                Status = ArtifactStatus.Drift,
-                NewContent = CanonicalText.ReadFileStripBom(tomlPath),
-                MoveFrom = tomlPath,
-            });
-        }
-        else if (tomlPath != null)
+        if (tomlPath != null)
         {
             var cfg = ProjectConfig.Load(tomlPath, root); // 파싱/스키마 검증, 실패 시 CliError 전파
             srcRoot = cfg.SrcRoot;
@@ -140,27 +122,6 @@ public static class Onboarding
             NewContent = distStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(distCanonicalLines),
         });
 
-        // 개명 전 스킬 폴더(.claude\skills\vbaflow): vbaflow가 벤더링한 파일만 지우고, 사용자 파일이
-        // 남아 있으면 폴더는 보존한다. 새 스킬은 위의 vbaloop 경로에 이미 준비됐다.
-        var legacySkillDir = System.IO.Path.Combine(root, ".claude", "skills", LegacyNames.SkillDirName);
-        if (Directory.Exists(legacySkillDir))
-        {
-            var managed = LegacyNames.SkillFiles
-                .Select(f => System.IO.Path.Combine(legacySkillDir, f))
-                .Where(File.Exists)
-                .ToList();
-            bool emptyDir = !Directory.EnumerateFileSystemEntries(legacySkillDir, "*", SearchOption.AllDirectories)
-                .Any(e => File.Exists(e));
-            if (managed.Count > 0 || emptyDir)
-                items.Add(new Item
-                {
-                    Name = System.IO.Path.GetRelativePath(root, legacySkillDir) + " (legacy)",
-                    Path = legacySkillDir,
-                    Status = ArtifactStatus.Drift,
-                    DeleteFiles = managed,
-                });
-        }
-
         // .gitignore 관리 블록 (사용자 소유 파일 부분 관리 — CLAUDE.md와 동형 upsert).
         // dist 아티팩트/도구 스크래치(dist/, _dbg/)를 커밋 대상에서 제외(설계 §9.7).
         var gitignorePath = System.IO.Path.Combine(root, ".gitignore");
@@ -192,33 +153,12 @@ public static class Onboarding
                 results.Add((item, ArtifactAction.Unchanged));
                 continue;
             }
-            if (item.DeleteFiles != null)
-            {
-                foreach (var f in item.DeleteFiles) File.Delete(f);
-                RemoveEmptyDirs(item.Path);
-                results.Add((item, ArtifactAction.Removed));
-                continue;
-            }
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(item.Path)!);
             File.WriteAllText(item.Path, item.NewContent!, CanonicalText.Utf8NoBom);
-            if (item.MoveFrom != null)
-            {
-                File.Delete(item.MoveFrom); // 새 파일 기록 성공 뒤에만 옛 파일 삭제
-                results.Add((item, ArtifactAction.Migrated));
-                continue;
-            }
             results.Add((item, item.Status == ArtifactStatus.Missing
                 ? ArtifactAction.Created : ArtifactAction.Overwritten));
         }
         return results;
-    }
-
-    /// <summary>하위부터 빈 폴더만 지운다(파일이 남은 폴더와 그 조상은 보존).</summary>
-    private static void RemoveEmptyDirs(string dir)
-    {
-        if (!Directory.Exists(dir)) return;
-        foreach (var sub in Directory.EnumerateDirectories(dir)) RemoveEmptyDirs(sub);
-        if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
     }
 
     /// <summary>루트 최상위의 *.xlsm 중 Excel 잠금 스텁(~$*)을 제외하고 정확히 1개를 요구.</summary>

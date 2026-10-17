@@ -38,7 +38,7 @@ public class ManagedBlockTests
     }
 
     [Fact]
-    public void Upsert_MigratesLegacyHeading_UpToNextH2()
+    public void Upsert_UnmarkedOwnHeading_ReplacedUpToNextH2()
     {
         var existing = "# 헤더\r\n\r\n## 개발 루프 (vbaloop)\r\n\r\n옛 절차 1\r\n옛 절차 2\r\n\r\n## 아키텍처\r\n뒤쪽 유지\r\n";
         var (text, changed) = ManagedBlock.Upsert(existing, Body);
@@ -48,7 +48,7 @@ public class ManagedBlockTests
     }
 
     [Fact]
-    public void Upsert_MigratesLegacyHeading_AtEof()
+    public void Upsert_UnmarkedOwnHeading_ReplacedAtEof()
     {
         var existing = "# 헤더\r\n\r\n## 개발 루프 (vbaloop)\r\n옛 절차\r\n";
         var (text, changed) = ManagedBlock.Upsert(existing, Body);

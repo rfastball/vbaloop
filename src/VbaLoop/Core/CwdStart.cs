@@ -7,7 +7,7 @@ namespace VbaLoop.Core;
 /// </summary>
 public static class CwdStart
 {
-    /// <param name="IsProject">이미 vbaloop 프로젝트(vbaloop.toml/vbaflow.toml)다 — 다시 세팅을 제안.</param>
+    /// <param name="IsProject">이미 vbaloop 프로젝트(vbaloop.toml)다 — 다시 세팅을 제안.</param>
     /// <param name="Workbooks">최상위 *.xlsm(잠금 스텁 ~$ 제외), 이름순.</param>
     /// <param name="IsEmpty">점(.)으로 시작하는 항목(.git, .gitignore 등) 말고는 비어 있다 — 새 프로젝트 후보.</param>
     public sealed record State(bool IsProject, IReadOnlyList<string> Workbooks, bool IsEmpty);
@@ -16,8 +16,7 @@ public static class CwdStart
     {
         if (!Directory.Exists(dir)) return new State(false, Array.Empty<string>(), true);
 
-        bool isProject = File.Exists(Path.Combine(dir, "vbaloop.toml"))
-                         || File.Exists(Path.Combine(dir, LegacyNames.TomlFile));
+        bool isProject = File.Exists(Path.Combine(dir, "vbaloop.toml"));
         var workbooks = Directory.EnumerateFiles(dir, "*.xlsm", SearchOption.TopDirectoryOnly)
             .Select(p => Path.GetFileName(p))
             .Where(n => !n.StartsWith("~$"))

@@ -4,7 +4,7 @@ namespace VbaLoop.Excel;
 
 /// <summary>
 /// COM busy 명시 재시도 + poison 판정 (설계 §4 push 2단계, §6).
-/// busy 목록은 _VbaHarness Invoke-Dev.ps1 $busyHResults 이식 — 그 외 예외를 재시도하면
+/// 재시도는 busy HRESULT 목록에 한정한다 — 그 외 예외를 재시도하면
 /// 모달 시나리오에서 행이 5배가 되므로 busy만 재시도한다.
 /// </summary>
 public static class ComRetry

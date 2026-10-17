@@ -227,21 +227,6 @@ vbaloop가 PC에 바꾸는 것은 셋이다: Excel의 "VBA 프로젝트 개체 �
 자세한 내용과 되돌리는 방법, 취약점 제보는 [SECURITY.md](SECURITY.md),
 포함된 제3자 코드는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있다.
 
-<details>
-<summary><b>vbaflow에서 이전</b></summary>
-
-<br>
-
-`vbaflow` 시절 프로젝트도 그대로 동작한다. 각 프로젝트에서 `vbaloop init`을 한 번 실행하면 다음이 새 이름으로 옮겨진다.
-
-- `vbaflow.toml`
-- 관리 블록 마커
-- `.claude\skills\vbaflow\`
-
-dist가 기록하는 문서 속성 이름은 `vbaloop_*`로 바뀐다. 옛 설치 폴더 `%LOCALAPPDATA%\vbaflow\bin`은 직접 지운다.
-
-</details>
-
 ## 개발
 
 ```powershell

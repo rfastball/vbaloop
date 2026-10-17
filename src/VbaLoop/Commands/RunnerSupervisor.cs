@@ -32,7 +32,7 @@ internal static class RunnerSupervisor
     {
         string exe = Environment.ProcessPath
             ?? throw new CliError("자기 exe 경로를 확인할 수 없음");
-        string toml = cfg.TomlPath; // 이전 전 프로젝트는 vbaflow.toml — 경로를 조립하면 자식이 설정을 못 찾는다
+        string toml = cfg.TomlPath; // --config로 받은 경로일 수 있다 — 조립하면 자식이 설정을 못 찾는다
 
         var psi = new ProcessStartInfo
         {

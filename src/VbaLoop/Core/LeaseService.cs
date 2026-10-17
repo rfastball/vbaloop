@@ -2,9 +2,9 @@ namespace VbaLoop.Core;
 
 /// <summary>
 /// lease 오케스트레이션 — 자동 획득(acquire-or-renew) 모델(사용자 확정).
-/// vh는 명시 acquire 필수였지만 vbaloop는 게이트 명령이 자동 획득한다. 그 대가로
+/// 명시 acquire 없이 게이트 명령이 자동 획득한다. 그 대가로
 /// LeaseFile의 유휴 백스톱(process-bound도 만료+grace 회수)이 영구 점유를 방지한다.
-/// 경쟁 정책(vh 동일): 살아있는 타 소유자 = 즉시 실패(대기 없음), 회수 가능 = 삭제 후
+/// 경쟁 정책: 살아있는 타 소유자 = 즉시 실패(대기 없음), 회수 가능 = 삭제 후
 /// 재시도, 내 것 = 멱등 갱신.
 /// </summary>
 public static class LeaseService

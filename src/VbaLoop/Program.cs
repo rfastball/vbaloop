@@ -163,7 +163,7 @@ internal static class Program
     private static void PrintUsage() => Console.Error.WriteLine(UsageText());
 
     private static string UsageText() => """
-        vbaloop (vf) - Excel VBA 프로젝트를 위한 최소 에이전트 개발 루프
+        vbaloop - Excel VBA 프로젝트를 위한 최소 에이전트 개발 루프
 
         처음이라면: vbaloop setup   (환경 점검 -> 설치 -> 워크북/폴더 선택 -> 하네스 -> 검증)
         기존 워크북: vbaloop.exe 위로 .xlsm을 끌어다 놓기 (원본 옆 <이름>\ 폴더에 사본을 만들어 작업)

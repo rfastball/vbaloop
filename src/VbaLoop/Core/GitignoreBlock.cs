@@ -28,13 +28,6 @@ public static class GitignoreBlock
 
         string eol = existingText.Contains("\r\n") || !existingText.Contains('\n') ? "\r\n" : "\n";
         var lines = CanonicalText.SplitLines(existingText).ToList();
-        if (FindTrimmed(lines, StartMarker, 0) < 0) // 개명 전 마커(vbaflow:managed) → 새 마커
-            for (int i = 0; i < lines.Count; i++)
-            {
-                string tr = lines[i].Trim();
-                if (tr == LegacyNames.GitignoreStart) lines[i] = StartMarker;
-                else if (tr == LegacyNames.GitignoreEnd) lines[i] = EndMarker;
-            }
 
         List<string> merged;
         int start = FindTrimmed(lines, StartMarker, 0);

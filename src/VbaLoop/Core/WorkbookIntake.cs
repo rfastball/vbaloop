@@ -184,9 +184,7 @@ public static class WorkbookIntake
         => string.Equals(ProjectConfig.Load(null, folder).WorkbookPath, Path.Combine(folder, name),
             StringComparison.OrdinalIgnoreCase);
 
-    private static bool HasToml(string dir)
-        => File.Exists(Path.Combine(dir, "vbaloop.toml"))
-           || File.Exists(Path.Combine(dir, LegacyNames.TomlFile));
+    private static bool HasToml(string dir) => File.Exists(Path.Combine(dir, "vbaloop.toml"));
 
     private static bool SamePath(string a, string b)
         => string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b),

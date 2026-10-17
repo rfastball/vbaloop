@@ -47,7 +47,5 @@ public static class RepoLocator
         return result;
     }
 
-    /// <summary>vbaloop.toml 또는 개명 전 vbaflow.toml — 후자도 init --all이 이전 대상으로 수렴한다.</summary>
-    private static bool HasToml(string dir)
-        => File.Exists(Path.Combine(dir, "vbaloop.toml")) || File.Exists(Path.Combine(dir, LegacyNames.TomlFile));
+    private static bool HasToml(string dir) => File.Exists(Path.Combine(dir, "vbaloop.toml"));
 }

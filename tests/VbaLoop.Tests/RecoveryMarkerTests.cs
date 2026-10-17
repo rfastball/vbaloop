@@ -7,7 +7,7 @@ namespace VbaLoop.Tests;
 
 public class RecoveryMarkerTests : IDisposable
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "vf-recovery-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "vbaloop-recovery-" + Guid.NewGuid().ToString("N"));
     private string MarkerPath => Path.Combine(_dir, "_dbg", "recovery.json");
 
     public void Dispose()

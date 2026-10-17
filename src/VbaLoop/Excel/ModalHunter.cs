@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace VbaLoop.Excel;
 
 /// <summary>
-/// VBE 모달 탐지/해제 프리미티브 (Watch-Modal.ps1 이식, 순수 Win32 — COM 미사용).
+/// VBE 모달 탐지/해제 프리미티브 (순수 Win32 — COM 미사용).
 /// 배경: 본문 컴파일 오류·미처리 런타임 오류는 트랩 불가 VBE 모달(#32770)로 뜨고,
 /// 다이얼로그만 닫으면 Application.Run이 반환되지 않는다 — VBE 창까지 닫아야 제어가 복귀
 /// (2026-07-03 실증). VBE 강제 닫기는 dirty 워크북에 NUIDialog("변경 저장?")를 유발하며

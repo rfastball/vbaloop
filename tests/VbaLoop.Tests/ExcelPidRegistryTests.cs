@@ -5,7 +5,7 @@ namespace VbaLoop.Tests;
 
 public class ExcelPidRegistryTests : IDisposable
 {
-    private readonly string _path = Path.Combine(Path.GetTempPath(), "vf-pids-" + Guid.NewGuid().ToString("N"), "excel-pids.json");
+    private readonly string _path = Path.Combine(Path.GetTempPath(), "vbaloop-pids-" + Guid.NewGuid().ToString("N"), "excel-pids.json");
 
     public void Dispose()
     {

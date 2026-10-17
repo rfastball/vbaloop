@@ -10,8 +10,7 @@ public enum VbaComponentKind
 
 /// <summary>
 /// Export 호환 헤더의 스트립/보존/합성 (설계 §2 파일 포맷, §4 pull/push).
-/// 스트립 로직은 _VbaHarness ModuleIO.bas Mio_InjectDocument의 일반화 +
-/// 폼 레이아웃의 중첩 Begin/End 블록 깊이 추적 확장.
+/// 스트립은 폼 레이아웃의 중첩 Begin/End 블록 깊이를 추적한다.
 /// </summary>
 public static class VbaHeader
 {

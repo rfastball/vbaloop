@@ -95,7 +95,7 @@ public class AttachMatchTests
     [Fact]
     public void SessionMeta_OwnerRoundTrip_AndLegacyIsTool()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "vf-meta-" + Guid.NewGuid().ToString("N"));
+        var dir = Path.Combine(Path.GetTempPath(), "vbaloop-meta-" + Guid.NewGuid().ToString("N"));
         try
         {
             var path = Path.Combine(dir, "session.json");

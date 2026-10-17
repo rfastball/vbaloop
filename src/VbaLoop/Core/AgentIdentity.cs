@@ -4,7 +4,7 @@ using System.Text;
 namespace VbaLoop.Core;
 
 /// <summary>
-/// lease 소유자 신원 결정 — vh-core.ps1 Get-OwnerIdentity/Get-AgentSession 이식.
+/// lease 소유자 신원 결정.
 /// 우선순위: env id > 프로세스 계보 > weak. 계보는 allowlist가 아니라 denylist 방식 —
 /// boundary(데스크톱/서비스 경계)에서 정지, shell은 통과, "경계 직전 가장 바깥의 non-shell
 /// 조상"이 장수 에이전트 호스트다(claude/codex/node 등 이름 하드코딩 아님).
@@ -18,7 +18,7 @@ public static class AgentIdentity
 
     public sealed record AgentHost(int Pid, string Name, string StartTimeIso);
 
-    /// <summary>vh 이식 + vbaloop 방어적 추가.</summary>
+    /// <summary>계보 탐색을 멈추는 데스크톱/서비스 경계 프로세스.</summary>
     public static readonly string[] BoundaryNames =
         { "explorer", "services", "wininit", "winlogon", "svchost", "lsass", "csrss", "smss", "system", "idle" };
 
@@ -26,7 +26,7 @@ public static class AgentIdentity
         { "cmd", "powershell", "pwsh", "conhost", "windowsterminal", "openconsole", "bash", "sh", "wsl", "wslhost" };
 
     public static readonly string[] EnvIdNames =
-        { "VBALOOP_SESSION_ID", LegacyNames.SessionEnv, "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "AGENT_THREAD_ID" };
+        { "VBALOOP_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "AGENT_THREAD_ID" };
 
     public static Identity Resolve(string projectPath)
         => Resolve(projectPath, Environment.GetEnvironmentVariable,
@@ -108,7 +108,7 @@ public static class AgentIdentity
         }
     }
 
-    /// <summary>vh 이식: base64(UTF8(경로))에서 비영숫자 제거 후 앞 12자.</summary>
+    /// <summary>base64(UTF8(경로))에서 비영숫자 제거 후 앞 12자.</summary>
     public static string ProjectKey(string projectPath)
     {
         var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(projectPath.ToLowerInvariant()));
