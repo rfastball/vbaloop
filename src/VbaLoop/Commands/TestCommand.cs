@@ -25,7 +25,9 @@ public static class TestCommand
         LeaseService.AcquireOrRenew(cfg, "test", log);
 
         // 자식을 띄우기 전에 세션을 확보 (auto-ensure: 없으면 스스로 기동)
-        var meta = SessionEnsure.ForCommand(cfg, log, o, "test").Meta;
+        // 일회용 모드는 정본을 읽기 전용으로 연다 — 테스트가 바꾼 시트·상태는 저장되지 않고 인스턴스와 함께 사라진다
+        using var ses = ExcelScope.Acquire(cfg, log, o, "test", ScopeAccess.Read);
+        var meta = ses.Meta;
 
         string runId = Guid.NewGuid().ToString("N");
         int timeoutSec = opts.TimeoutSec ?? DefaultTimeoutSec;
@@ -88,7 +90,7 @@ public static class TestCommand
             o.HumanLines.Add($"  SKIP {skipped}건 — 세션 종료로 미실행");
 
         if (sessionDied)
-            o.HumanLines.Add("주의: 컴파일 오류 모달 해제로 Excel 세션이 종료됨 — 후속 명령 전에 session start 필요");
+            o.HumanLines.Add($"주의: 컴파일 오류 모달 해제로 Excel 세션이 종료됨 — {sup.RestartNote}");
         if (sup.Marker != null)
             o.HumanLines.Add($"주의: {sup.RecoveryTail} — 해제 전까지 세션 명령은 exit 3");
 
@@ -96,10 +98,10 @@ public static class TestCommand
         if (fail > 0)
             o.Fail($"테스트 실패 {fail}건 (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
                    + ") — 실패 레코드는 payload.tests 참조"
-                   + (sessionDied ? " (세션 종료됨, session start 필요)" : ""),
+                   + (sessionDied ? $" (세션 종료됨, {sup.RestartNote})" : ""),
                 sessionDied ? sup.SessionHint : null);
         else if (skipped > 0)
-            o.Fail($"세션 종료로 테스트 {skipped}건 미실행 (pass {pass}) — session start 후 재실행 필요",
+            o.Fail($"세션 종료로 테스트 {skipped}건 미실행 (pass {pass}) — {sup.RestartNote}, 재실행 필요",
                 sup.SessionHint);
         else if (sessionDied)
             o.Hint = sup.SessionHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우

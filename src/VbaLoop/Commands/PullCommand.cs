@@ -28,7 +28,7 @@ public static class PullCommand
         using var cmdLock = CommandMutex.Acquire(cfg);
         LeaseService.AcquireOrRenew(cfg, "pull", log);
 
-        var ses = SessionEnsure.ForCommand(cfg, log, o, "pull");
+        using var ses = ExcelScope.Acquire(cfg, log, o, "pull", ScopeAccess.Read);
         var (app, meta) = (ses.App, ses.Meta);
         var filter = OleMessageFilter.Register();
         try

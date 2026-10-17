@@ -70,24 +70,10 @@ public static class PushCommand
         using var cmdLock = CommandMutex.Acquire(cfg);
         LeaseService.AcquireOrRenew(cfg, "push", log);
 
-        var ses = SessionEnsure.ForCommand(cfg, log, o, "push");
-        var (app, meta) = (ses.App, ses.Meta);
-        var filter = OleMessageFilter.Register();
-        try
-        {
-            return ComFailureGuard.Run(cfg, meta, log, () => Execute(o, opts, cfg, app, meta, log));
-        }
-        finally
-        {
-            filter.Revoke();
-        }
-    }
-
-    private static Outcome Execute(Outcome o, CliArgs opts, ProjectConfig cfg, dynamic app, SessionMeta meta, ToolLog log)
-    {
         // 0. 해시 캐시(changed-only): 지문 일치면 no-op 성공 (--prune/--force 시에는 우회)
         // 캐시는 세션 메타가 아니라 영속 sync.json — session stop 후에도 살아남는다.
         // --force는 캐시 불신 시 전량 재주입 수단(워크북과 src 지문이 어긋난 의심 상황).
+        // Excel 확보 전에 판정한다 — no-op에 일회용 Excel을 띄울 이유가 없다.
         var sync = SyncCache.Load(SyncCache.PathFor(cfg));
         string fingerprint = Fingerprint.Compute(cfg.SrcRoot);
         if (sync.LastPushFingerprint == fingerprint)
@@ -101,6 +87,25 @@ public static class PushCommand
             if (opts.Force)
                 log.Write("info", "push_cache_bypassed", new { fingerprint });
         }
+
+        using var ses = ExcelScope.Acquire(cfg, log, o, "push", ScopeAccess.Write);
+        var (app, meta) = (ses.App, ses.Meta);
+        var filter = OleMessageFilter.Register();
+        try
+        {
+            return ComFailureGuard.Run(cfg, meta, log,
+                () => Execute(o, opts, cfg, app, meta, ses.Ephemeral, sync, fingerprint, log));
+        }
+        finally
+        {
+            filter.Revoke();
+        }
+    }
+
+    /// <param name="ephemeral">이 명령 전용 일회용 Excel — 실패하면 원복 대신 저장 없이 폐기하고, 저장 전 컴파일 게이트를 돈다.</param>
+    private static Outcome Execute(Outcome o, CliArgs opts, ProjectConfig cfg, dynamic app, SessionMeta meta,
+        bool ephemeral, SyncCache sync, string fingerprint, ToolLog log)
+    {
 
         // 1. 파일 읽기 + 사전 검증 — 워크북을 건드리기 전에 전부 끝낸다
         int codePage = NativeMethods.GetACP(); // 상수 하드코딩 금지
@@ -143,7 +148,8 @@ public static class PushCommand
         // 실패하면 워크북을 건드리기 전에 중단(fail closed): 백업 없는 주입은 rollback 근거가 없다.
         string? backupId = BackupBeforeMutation(cfg, app, wb, fingerprint, sync, log);
         if (backupId != null)
-            o.HumanLines.Add($"백업: _dbg/backups/{backupId} (되돌리기: session stop 후 vbaloop rollback --latest)");
+            o.HumanLines.Add($"백업: _dbg/backups/{backupId} (되돌리기: "
+                             + (ephemeral ? "" : "session stop 후 ") + "vbaloop rollback --latest)");
 
         var results = new List<ModuleResult>();
 
@@ -193,7 +199,7 @@ public static class PushCommand
 
         if (abortReason != null)
             return FailWithRecovery(o, PushRecovery.Phase.Inject, abortReason, journal, proj, cfg, meta, log,
-                results, fingerprint, backupId, fatalCom);
+                results, fingerprint, backupId, fatalCom, ephemeral);
 
         // 4. prune 실행 (검증형 Remove: 제거 후 이름 부재 확인, 실패 시 save 전 중단)
         if (opts.Prune)
@@ -210,7 +216,7 @@ public static class PushCommand
                     fatalCom = SessionService.PoisonIfFatal(cfg, meta, e, log);
                     results.Add(new ModuleResult { Name = extra.Name, Action = "failed", Reason = e.Message });
                     return FailWithRecovery(o, PushRecovery.Phase.Prune, $"{extra.Name}: {e.Message}", journal, proj,
-                        cfg, meta, log, results, fingerprint, backupId, fatalCom);
+                        cfg, meta, log, results, fingerprint, backupId, fatalCom, ephemeral);
                 }
                 expectedRemoved.Add(extra.Name);
                 results.Add(new ModuleResult { Name = extra.Name, Action = "pruned" });
@@ -230,7 +236,7 @@ public static class PushCommand
             if (diff.Missing.Count > 0)
                 parts.Add($"사라진 이름: {string.Join(", ", diff.Missing)}");
             return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"무결성 체크 실패: {string.Join(" / ", parts)}",
-                journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false);
+                journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false, ephemeral: ephemeral);
         }
 
         // 빈 주입 방지: 본문이 있는 모듈은 주입 후 CountOfLines > 0
@@ -242,9 +248,31 @@ public static class PushCommand
             if (lines == 0)
             {
                 return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"무결성 체크 실패: {r.Name} 주입 후 본문이 비어 있음",
-                    journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false);
+                    journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false, ephemeral: ephemeral);
             }
         }
+
+        // 6.5. 컴파일 게이트: 저장 전에 VBE 컴파일 — 컴파일되지 않는 코드는 디스크 정본에 들어가지 않는다.
+        //      모달 해제가 VBE를 닫고(Excel 종료 가능) 타임아웃이 kill로 끝나므로 일회용 인스턴스에서만 돈다.
+        var (compile, compileSkip) = CompileGate(opts, cfg, (object)app, (object)proj, meta, ephemeral, log);
+        object compilePayload = compile != null
+            ? new { result = compile.Label, detail = compile.Detail }
+            : new { result = "skipped", detail = compileSkip };
+        if (compile is { Publishable: false })
+        {
+            o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, compile: compilePayload);
+            bool compileError = compile.Kind == DistCompileVerdict.Kind.CompileError;
+            o.Fail(
+                (compileError ? $"컴파일 오류 — 저장하지 않음: {compile.Detail}" : $"컴파일 검증 불가 — 저장하지 않음: {compile.Detail}")
+                + " (일회용 Excel을 저장 없이 폐기, 디스크 정본은 push 이전 상태)",
+                compileError
+                    ? "src에서 해당 오류를 고친 뒤 push 재시도. 이번 변경과 무관한 기존 오류면 사용자 확인 후 push --skip-compile"
+                    : "AccessVBOM과 VBE 상태 확인. 검증 없이 저장하려면 push --skip-compile");
+            log.Write("error", "push_compile_gate_failed", new { result = compile.Label, detail = compile.Detail });
+            return o;
+        }
+        if (compile?.Kind == DistCompileVerdict.Kind.Unverified)
+            o.HumanLines.Add($"주의: 컴파일 검증 불완전 — {compile.Detail}");
 
         // 7. 종결: 무결성 통과 직후 save — 저장 없이 성공을 보고하지 않는다(poison-kill 유실 방지)
         app.DisplayAlerts = false;
@@ -260,9 +288,9 @@ public static class PushCommand
             log.Write("error", "push_saveas_drift", new { expected = cfg.WorkbookPath, actual = actualFull });
             // 세션 워크북의 FullName이 오탈출 사본을 가리켜 세션 자체가 못 쓰는 상태 —
             // poison해서 다음 명령의 auto-ensure가 kill/재기동하게 한다(잠금 잔존 시 fail-fast).
-            meta.MarkPoisoned(cfg.SessionMetaPath,
+            meta.MarkPoisoned(
                 $"push: Save가 정본 대신 {actualFull}로 SaveAs됨(read-only 잠금 의심)", null);
-            o.Payload = BuildPayload(results, fingerprint, saved: false, backupId);
+            o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, compile: compilePayload);
             o.Fail(
                 $"저장 드리프트: Save가 정본({cfg.WorkbookPath})이 아니라 {actualFull}에 기록됨 — 캐시 미갱신, 오탈출 사본은 수동 삭제 필요",
                 "vbaloop doctor로 정본 파일 잠금 확인 후 재시도",
@@ -282,20 +310,44 @@ public static class PushCommand
         });
 
         var summary = results.GroupBy(r => r.Action).Select(g => $"{g.Key} {g.Count()}");
-        o.HumanLines.Add($"push 완료(저장됨): {string.Join(", ", summary)}");
-        o.Payload = BuildPayload(results, fingerprint, saved: true, backupId);
+        o.HumanLines.Add($"push 완료(저장됨): {string.Join(", ", summary)}"
+                         + (compile != null ? $", 컴파일 {compile.Label}" : ""));
+        o.Payload = BuildPayload(results, fingerprint, saved: true, backupId, compile: compilePayload);
         return o;
     }
 
     private static object BuildPayload(List<ModuleResult> results, string fingerprint, bool saved, string? backupId,
-        object? recovery = null) => new
+        object? recovery = null, object? compile = null) => new
     {
         saved,
         fingerprint,
         backup = backupId,
         recovery,
+        compile,
         modules = results.Select(m => new { name = m.Name, action = m.Action, reason = m.Reason }),
     };
+
+    // ---- 6.5단계: 컴파일 게이트 ----
+
+    /// <summary>
+    /// 저장 전 VBE 컴파일. 반환: (판정, 생략 사유). 생략은 --skip-compile, [push] compile = false, 그리고
+    /// 유지되는 세션 Excel(persistent 모드, session start/attach) — 모달 해제의 VBE 닫기와 타임아웃 kill을
+    /// 사용자가 보는 Excel에 가하지 않기 위해서다. 그 세션들의 컴파일 오류는 test가 모달 본문으로 보고한다.
+    /// </summary>
+    private static (DistCompileVerdict.Verdict? Verdict, string? SkipReason) CompileGate(
+        CliArgs opts, ProjectConfig cfg, object app, object proj, SessionMeta meta, bool ephemeral, ToolLog log)
+    {
+        string? skip = opts.SkipCompile ? "--skip-compile"
+            : !cfg.PushCompile ? "[push] compile = false"
+            : !ephemeral ? "유지되는 세션 Excel(persistent 모드, session start/attach)에서는 컴파일 게이트를 돌리지 않음 — test가 컴파일 오류를 보고"
+            : null;
+        if (skip != null)
+        {
+            log.Write("info", "push_compile_skipped", new { reason = skip });
+            return (null, skip);
+        }
+        return (VbeCompile.Run(app, proj, meta.Pid, log, "push"), null);
+    }
 
     // ---- 실패 복구: 건드린 모듈 전부 원복, 아니면 poison (PushRecovery) ----
 
@@ -306,8 +358,26 @@ public static class PushCommand
     private static Outcome FailWithRecovery(
         Outcome o, PushRecovery.Phase phase, string reason, Journal journal, dynamic proj,
         ProjectConfig cfg, SessionMeta meta, ToolLog log, List<ModuleResult> results,
-        string fingerprint, string? backupId, bool fatalCom)
+        string fingerprint, string? backupId, bool fatalCom, bool ephemeral)
     {
+        if (ephemeral)
+        {
+            // 일회용 인스턴스는 저장 없이 버려지므로(ExcelScope.Dispose) 메모리 원복이 필요 없다.
+            // 치명 COM이면 PoisonIfFatal이 이미 이 인스턴스 메타에 poison을 남겼고, 정리는 격리 규칙이 맡는다.
+            log.Write("warn", "push_discarded", new { phase = phase.ToString(), reason, fatalCom, backup = backupId });
+            o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, new
+            {
+                phase = phase.ToString().ToLowerInvariant(),
+                workbookState = "discarded",
+                restored = Array.Empty<string>(),
+                failures = Array.Empty<string>(),
+                poisonReason = (string?)null,
+            });
+            o.Fail($"push 중단(저장 안 함): {reason} — 일회용 Excel을 저장 없이 폐기, 디스크 정본은 push 이전 상태",
+                "원인 해결 후 재시도", environment: fatalCom);
+            return o;
+        }
+
         var plan = PushRecovery.Decide(journal.Touches, phase);
         var restored = new List<string>();
         var failures = new List<string>();
@@ -333,7 +403,7 @@ public static class PushCommand
             ?? (fatalCom ? "치명적 COM 오류(세션 연결 끊김)"
                 : failures.Count > 0 ? "원복 실패: " + string.Join("; ", failures) : null);
         if (state == PushRecovery.WorkbookState.Poisoned && !meta.Poisoned)
-            meta.MarkPoisoned(cfg.SessionMetaPath, $"push 부분 실패 — {poisonReason}", null);
+            meta.MarkPoisoned($"push 부분 실패 — {poisonReason}", null);
         // 실패 모듈은 failed(사유 유지) 그대로 두고, 성공 주입됐다가 되돌린 모듈만 restored로 표기
         foreach (var r in results.Where(r => r.Action != "failed" && restored.Contains(r.Name, StringComparer.OrdinalIgnoreCase)))
             r.Action = "restored";

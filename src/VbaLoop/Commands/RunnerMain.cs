@@ -41,7 +41,7 @@ public static class RunnerMain
     {
         var cfg = ProjectConfig.Load(opts.Config, Environment.CurrentDirectory);
         string runId = opts.RunId ?? Guid.NewGuid().ToString("N");
-        var (app, meta) = SessionService.AcquireOrThrow(cfg, opts.Macro != null ? "run" : "test");
+        var (app, meta) = SessionService.AcquireOrThrow(cfg, opts.Macro != null ? "run" : "test", null, opts.SessionMeta);
         var filter = OleMessageFilter.Register();
         try
         {
@@ -113,7 +113,7 @@ public static class RunnerMain
                         next++;
                         break;
                     }
-                    meta.MarkPoisoned(cfg.SessionMetaPath, $"test {full}: {ex.Message}", ex.HResult);
+                    meta.MarkPoisoned($"test {full}: {ex.Message}", ex.HResult);
                     PrintResult(new
                     {
                         ok = false,
@@ -257,7 +257,7 @@ public static class RunnerMain
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult))
         {
-            meta.MarkPoisoned(cfg.SessionMetaPath, $"run {full}: {ex.Message}", ex.HResult);
+            meta.MarkPoisoned($"run {full}: {ex.Message}", ex.HResult);
             PrintResult(new
             {
                 ok = false,

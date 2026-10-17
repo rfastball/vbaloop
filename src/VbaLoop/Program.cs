@@ -156,7 +156,7 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
         return o;
     }
 
@@ -174,22 +174,23 @@ internal static class Program
           vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 전 프로젝트 일괄)
           vbaloop doctor  [--json] [--kill-orphans] [--fix]  환경 점검 + 고아 Excel 리포트(kill/fix는 명시 시)
           vbaloop status  [--json]                 세션/프로젝트 상태
-          vbaloop diff    [--json] [--module <이름>]  워크북 VBProject vs src 읽기 전용 비교 (활성 세션 필요)
-          vbaloop session start|stop [--no-save] [--discard]   도구 소유 Excel 세션 시작/종료 (--discard: 저장 없이 버리고 격리 해제)
+          vbaloop diff    [--json] [--module <이름>]  워크북 VBProject vs src 읽기 전용 비교 (일회용 모드는 읽기 전용 Excel, persistent는 활성 세션 필요)
+          vbaloop session start|stop [--no-save] [--discard]   유지되는 도구 소유 Excel 세션 시작/종료 (기본 일회용 모드에선 선택, --discard: 저장 없이 버리고 격리 해제)
           vbaloop session attach                   사용자가 이미 연 정본 워크북을 채택 (stop은 분리만, Excel 종료/저장 안 함)
           vbaloop recovery status|clear [--force]  격리 상태 확인/해제 (clear는 격리된 Excel 종료 확인 후에만, --force는 경고와 함께)
           vbaloop pull    [--json] [--force]       워크북 -> src (동기화 안 된 src 편집 시 차단)
-          vbaloop push    [--json] [--force] [--prune] [--force-form-import]   src -> 워크북 (in-place 주입, --force는 지문 캐시 우회 전량 재주입)
+          vbaloop push    [--json] [--force] [--prune] [--force-form-import] [--skip-compile]   src -> 워크북 (in-place 주입 -> VBE 컴파일 통과 시 저장, --force는 지문 캐시 우회 전량 재주입)
           vbaloop test    [--json] [--timeout N]   Test_* 프로시저 실행/판독
           vbaloop run     <Module.Proc> [--timeout N]   임의 매크로 단건 실행
           vbaloop dist    [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   클린 사본 배포 빌드(§9, 게시 전 VBE 컴파일 검증, .xlam도 지원)
-          vbaloop rollback --list | --latest | --backup <id> [--json]   push 전 백업으로 워크북 복원 (세션 종료 상태에서만)
+          vbaloop rollback --list | --latest | --backup <id> [--json]   push 전 백업으로 워크북 복원 (유지 세션 종료 상태에서만)
           vbaloop lease   acquire|release|status|break [--force]   다중 에이전트 lease
           vbaloop lint    [--json]                 규약/인코딩/헤더 전수 검사 (Excel 불필요)
           vbaloop bugreport "<제목>" | --list       vbaloop 자체 결함 리포트 생성/열거 (vbaloop\docs\bugreports)
           vbaloop version                          실행 exe의 git 리비전 + 빌드 시각
 
         공통: --config <vbaloop.toml 경로>  (기본: cwd에서 상위로 탐색)
+        세션 모드: vbaloop.toml [excel] session = "ephemeral"(기본, 명령마다 숨은 Excel) | "persistent"
         종료 코드: 성공 0, 환경 오류(세션/Excel/COM/busy/격리 - hint 확인) 3, 그 외 2
         """;
 }

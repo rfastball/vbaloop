@@ -6,8 +6,10 @@
 프로젝트 고유 내용은 이 관리 블록 밖에 작성한다 (init이 블록 내부를 덮어씀).
 
 1. 편집: src\*.bas/.cls/.frm 수정
-2. 세션: 자동 확보(push/test가 스스로 띄움, 수동은 vbaloop session start)
-3. 주입: vbaloop push (src -> 워크북 in-place 주입, --prune/--force 지원. 주입 직전 _dbg\backups\에 백업)
+2. 세션: 기본은 일회용 - push/pull/test/run/diff가 명령마다 숨은 Excel을 띄우고 닫는다(vbaloop.toml
+   [excel] session). session start/attach로 연 세션이 살아 있으면 그것을 쓴다
+3. 주입: vbaloop push (src -> 워크북 in-place 주입 -> VBE 컴파일 통과 시에만 저장, --prune/--force 지원.
+   주입 직전 _dbg\backups\에 백업)
 4. 실행: vbaloop test (Test_* 전체 실행 + LogShim jsonl 판독, --timeout <초>)
 5. 수정: fail이면 원인 고치고 1로, green이면 완료(버전관리를 쓰면 이때 커밋)
 
@@ -21,9 +23,12 @@
   vbaloop session attach - 그 Excel에서 push/test가 동작하고 session stop은 분리만 한다
 - 테스트는 Public Sub Test_*() (인자 없음), 단언은 LogShim.AssertEq (Debug.Assert 금지)
 - src\LogShim.bas는 벤더링 사본 - 직접 수정 금지, 갱신은 vbaloop init
-- push 실패 시 hint가 워크북 상태를 말한다(변경 없음 / 전부 원복 / 세션 poison - 저장 안 함).
-  디스크 정본은 항상 push 이전 상태. 워크북 파일 자체를 되돌리려면 session stop 후
-  vbaloop rollback --latest (목록: rollback --list, 세션이 살아 있으면 exit 3)
+- push 실패 시 hint가 워크북 상태를 말한다(변경 없음 / 전부 원복 / 폐기 / 세션 poison - 저장 안 함).
+  디스크 정본은 항상 push 이전 상태. 컴파일 오류(payload.compile.result = compile_error)면 고치고 재push -
+  이번 변경과 무관한 기존 오류일 때만 사용자 확인 후 push --skip-compile.
+  워크북 파일 자체를 되돌리려면 vbaloop rollback --latest (목록: rollback --list,
+  유지 세션이 살아 있으면 exit 3 - session stop 먼저)
+- 일회용 모드의 test/run은 정본을 읽기 전용으로 연다 - 테스트가 바꾼 시트는 저장되지 않는다
 - 배포 아티팩트: vbaloop dist --out <경로> (클린 사본 빌드 - 필터/스탬프/무해화/VBE 컴파일 검증/선택 부트스트랩).
   push 선행 필수(마지막 push == src 미동기 시 거부). 절차/실패 플레이북은 SKILL.md
 - pull은 동기화 안 된 src 편집이 있으면 차단된다 - 기본은 push로 먼저 반영,

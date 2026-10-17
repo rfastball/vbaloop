@@ -12,7 +12,10 @@ public sealed class ProjectConfig
     public required string ProjectName { get; init; }
     /// <summary>워크북 절대 경로.</summary>
     public required string WorkbookPath { get; init; }
+    /// <summary>[excel].visible — persistent 세션 Excel의 표시 여부. 일회용 인스턴스는 항상 숨긴다.</summary>
     public bool Visible { get; init; } = true;
+    /// <summary>[excel].session — 세션 필요 명령이 쓰는 Excel 수명(설계 §4 세션 모드). 기본은 일회용.</summary>
+    public SessionMode SessionMode { get; init; } = SessionMode.Ephemeral;
     /// <summary>src 루트 절대 경로(평면 구조).</summary>
     public required string SrcRoot { get; init; }
 
@@ -31,22 +34,29 @@ public sealed class ProjectConfig
     public int BackupKeep { get; init; } = DefaultBackupKeep;
     public const int DefaultBackupKeep = 10;
 
+    // ---- [push] (설계 §4 push, 선택) ----
+    /// <summary>저장 전 VBE 컴파일 게이트. 일회용 인스턴스에서만 동작한다. --skip-compile로 1회 생략.</summary>
+    public bool PushCompile { get; init; } = true;
+
     public string DbgDir => Path.Combine(RootDir, "_dbg");
     public string SessionMetaPath => Path.Combine(DbgDir, "session.json");
     public string ToolLogPath => Path.Combine(DbgDir, "vbaloop.jsonl");
     /// <summary>격리 마커(설계 §11) — 존재하는 동안 세션 필요 명령은 exit 3.</summary>
     public string RecoveryMarkerPath => Path.Combine(DbgDir, "recovery.json");
     public string BackupsDir => Path.Combine(DbgDir, "backups");
+    /// <summary>일회용 인스턴스 메타(명령 하나 수명). 남아 있으면 비정상 종료한 명령의 잔재.</summary>
+    public string EphemeralDir => Path.Combine(DbgDir, "ephemeral");
 
     private static readonly HashSet<string> KnownSections = new(StringComparer.OrdinalIgnoreCase)
-        { "project", "excel", "src", "dist", "backup" };
+        { "project", "excel", "src", "dist", "backup", "push" };
     private static readonly Dictionary<string, HashSet<string>> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         ["project"] = new(StringComparer.OrdinalIgnoreCase) { "name" },
-        ["excel"] = new(StringComparer.OrdinalIgnoreCase) { "workbook", "visible" },
+        ["excel"] = new(StringComparer.OrdinalIgnoreCase) { "workbook", "visible", "session" },
         ["src"] = new(StringComparer.OrdinalIgnoreCase) { "root" },
         ["dist"] = new(StringComparer.OrdinalIgnoreCase) { "version", "exclude", "bootstrap", "stripcomments" },
         ["backup"] = new(StringComparer.OrdinalIgnoreCase) { "keep" },
+        ["push"] = new(StringComparer.OrdinalIgnoreCase) { "compile" },
     };
 
     public static string? FindTomlPath(string? configOverride, string cwd)
@@ -82,7 +92,7 @@ public sealed class ProjectConfig
         {
             if (!KnownSections.Contains(section))
                 throw new CliError($"{tomlPath}: 미지 섹션 [{section}]",
-                    "지원 섹션: [project], [excel], [src], [dist], [backup]");
+                    "지원 섹션: [project], [excel], [src], [dist], [backup], [push]");
             foreach (var key in doc[section].Keys)
                 if (!KnownKeys[section].Contains(key))
                     throw new CliError($"{tomlPath}: 미지 키 [{section}].{key}",
@@ -100,6 +110,8 @@ public sealed class ProjectConfig
                    ?? Path.GetFileNameWithoutExtension(workbookPath);
         bool visible = GetBool(doc, "excel", "visible") ?? true;
         int backupKeep = GetBackupKeep(doc, tomlPath);
+        var sessionMode = GetSessionMode(doc, tomlPath);
+        bool pushCompile = GetStrictBool(doc, "push", "compile", tomlPath) ?? true;
 
         return new ProjectConfig
         {
@@ -108,12 +120,14 @@ public sealed class ProjectConfig
             ProjectName = name,
             WorkbookPath = workbookPath,
             Visible = visible,
+            SessionMode = sessionMode,
             SrcRoot = Path.GetFullPath(Path.Combine(root, srcRel)),
             DistVersion = GetString(doc, "dist", "version"),
             DistExclude = GetStringList(doc, "dist", "exclude"),
             DistBootstrap = GetString(doc, "dist", "bootstrap"),
             DistStripComments = GetBool(doc, "dist", "stripComments") ?? false,
             BackupKeep = backupKeep,
+            PushCompile = pushCompile,
         };
     }
 
@@ -130,6 +144,27 @@ public sealed class ProjectConfig
         return keep;
     }
 
+    /// <summary>[excel].session: "ephemeral" | "persistent". 오타를 조용히 기본값으로 떨어뜨리지 않는다.</summary>
+    private static SessionMode GetSessionMode(Dictionary<string, Dictionary<string, object>> doc, string tomlPath)
+    {
+        if (!doc.TryGetValue("excel", out var s) || !s.TryGetValue("session", out var v))
+            return SessionMode.Ephemeral;
+        return (v as string)?.ToLowerInvariant() switch
+        {
+            "ephemeral" => SessionMode.Ephemeral,
+            "persistent" => SessionMode.Persistent,
+            _ => throw new CliError($"{tomlPath}: [excel].session은 \"ephemeral\" 또는 \"persistent\"",
+                "session = \"ephemeral\" (명령마다 숨은 Excel) | \"persistent\" (세션 Excel 유지)"),
+        };
+    }
+
+    private static bool? GetStrictBool(Dictionary<string, Dictionary<string, object>> doc, string section, string key,
+        string tomlPath)
+    {
+        if (!doc.TryGetValue(section, out var s) || !s.TryGetValue(key, out var v)) return null;
+        return v as bool? ?? throw new CliError($"{tomlPath}: [{section}].{key}는 true/false여야 함");
+    }
+
     private static string? GetString(Dictionary<string, Dictionary<string, object>> doc, string section, string key)
         => doc.TryGetValue(section, out var s) && s.TryGetValue(key, out var v) ? v as string : null;
 
@@ -139,4 +174,13 @@ public sealed class ProjectConfig
     private static IReadOnlyList<string> GetStringList(Dictionary<string, Dictionary<string, object>> doc, string section, string key)
         => doc.TryGetValue(section, out var s) && s.TryGetValue(key, out var v) && v is List<string> l
             ? l : Array.Empty<string>();
+}
+
+/// <summary>세션 필요 명령(push/pull/test/run/diff)이 쓰는 Excel 수명(설계 §4 세션 모드).</summary>
+public enum SessionMode
+{
+    /// <summary>명령마다 숨은 Excel을 띄우고 끝나면 닫는다. 살아 있는 명시 세션(session start/attach)이 있으면 그것을 쓴다.</summary>
+    Ephemeral,
+    /// <summary>auto-ensure가 세션 Excel을 띄워 명령 사이에 유지한다(구 기본 동작).</summary>
+    Persistent,
 }

@@ -80,6 +80,7 @@ public class OnboardingTests
         Assert.Equal("My Proj", cfg.ProjectName);
         Assert.Equal(System.IO.Path.Combine(t.Path, "My Book(v2.6).xlsm"), cfg.WorkbookPath);
         Assert.True(cfg.Visible);
+        Assert.Equal(SessionMode.Ephemeral, cfg.SessionMode);
         Assert.Equal(System.IO.Path.Combine(t.Path, "src"), cfg.SrcRoot);
     }
 

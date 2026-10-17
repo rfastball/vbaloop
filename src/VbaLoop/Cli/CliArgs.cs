@@ -21,6 +21,8 @@ public sealed class CliArgs
     public int? TimeoutSec { get; private set; }
     public string? Config { get; private set; }
     public string? RunId { get; private set; }
+    /// <summary>__runner 전용: 부모가 확보한 세션의 메타 파일(session.json 또는 일회용 인스턴스 메타).</summary>
+    public string? SessionMeta { get; private set; }
     /// <summary>__runner 전용: 테스트 열거 대신 단건 매크로 실행 (Module.Proc).</summary>
     public string? Macro { get; private set; }
     /// <summary>diff 전용: 단일 모듈로 좁히고 워크북 쪽 본문을 덤프.</summary>
@@ -91,6 +93,10 @@ public sealed class CliArgs
                 case "--runid":
                     if (++i >= args.Length) throw new CliError("--runid 뒤에 값 필요");
                     r.RunId = args[i];
+                    break;
+                case "--session-meta":
+                    if (++i >= args.Length) throw new CliError("--session-meta 뒤에 경로 필요");
+                    r.SessionMeta = args[i];
                     break;
                 case "--macro":
                     if (++i >= args.Length) throw new CliError("--macro 뒤에 Module.Proc 필요");
@@ -166,7 +172,7 @@ public sealed class CliArgs
     /// <summary>값을 하나 받는 옵션 — 다음 토큰은 옵션 값이지 위치 인자가 아니다.</summary>
     public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
     {
-        "--timeout", "--config", "--runid", "--macro", "--module",
+        "--timeout", "--config", "--runid", "--session-meta", "--macro", "--module",
         "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup",
     };
 

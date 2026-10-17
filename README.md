@@ -136,16 +136,22 @@ flowchart LR
 ```
 
 에이전트는 xlsm 안의 VBA 코드를 직접 읽거나 고칠 수 없다. 그래서 vbaloop는 코드를 `src\`의 텍스트 파일로 꺼내 두고,
-이 파일을 코드의 기준으로 삼는다. 에이전트가 파일을 고치면 vbaloop가 워크북의 VBA 프로젝트에 넣고, 테스트 프로시저를
-사람 조작 없이(헤드리스) 실행해 결과를 JSON으로 돌려준다. 에이전트는 그 결과를 보고 다음에 할 일을 정한다.
+이 파일을 코드의 기준으로 삼는다. 에이전트가 파일을 고치면 vbaloop가 워크북의 VBA 프로젝트에 넣고 컴파일이 되는지
+확인한 뒤 저장한다. 그다음 테스트 프로시저를 사람 조작 없이(헤드리스) 실행해 결과를 JSON으로 돌려준다. 에이전트는 그
+결과를 보고 다음에 할 일을 정한다.
+
+기본 설정에서는 명령마다 화면에 보이지 않는 Excel을 새로 띄우고, 명령이 끝나면 닫는다(명령당 1~2초). 테스트는 워크북을
+읽기 전용으로 열어 실행하므로, 테스트가 시트를 바꿔도 워크북에는 남지 않는다. Excel을 계속 띄워 두고 빠르게 반복하고
+싶으면 `vbaloop session start`로 세션을 열면 된다. 그 세션이 살아 있는 동안에는 모든 명령이 그 Excel을 쓴다.
 
 ## 특징
 
 | | |
 |---|---|
 | **한글이 깨지지 않는 왕복** | src와 워크북 사이에서 코드를 파일이 아닌 메모리(`CodeModule.Lines`)로 주고받아 코드페이지 변환이 없다. 한글처럼 시스템 코드페이지(ACP)에 있는 문자는 그대로 보존된다. 없는 문자(em dash, 이모지 등)는 VBE가 `?`로 바꿔 버리므로, push가 저장 전에 거부한다 |
-| **안전한 push** | 코드를 넣기 직전에 워크북을 백업한다. 도중에 실패하면 이번 push가 바꾼 모듈을 전부 되돌린다. 나중에라도 `rollback`으로 백업에서 복원할 수 있다 |
+| **안전한 push** | 코드를 넣기 직전에 워크북을 백업한다. 넣은 코드가 컴파일되지 않거나 도중에 실패하면 저장하지 않는다. 디스크의 워크북은 push 이전 그대로다. 나중에라도 `rollback`으로 백업에서 복원할 수 있다 |
 | **헤드리스 테스트** | 테스트를 별도 프로세스에서 실행하고 시간 제한을 건다. VBE 오류 대화상자는 Office 언어와 상관없이 자동으로 닫는다 |
+| **일회용 Excel** | 기본은 명령마다 숨은 Excel을 띄우고 닫는다. 명령 사이에 남는 Excel이 없어 꼬일 상태가 없고, 테스트는 매번 디스크의 워크북에서 깨끗하게 시작한다 |
 | **사용자 Excel 보호** | 응답하지 않는 Excel에 사용자 작업이 남아 있을 수 있으면 강제로 종료하지 않는다. 대신 격리 상태로 표시하고 확인을 요청한다(`recovery status`). 이미 열어 둔 워크북은 `session attach`로 그대로 쓴다 |
 | **에이전트 연동** | `init`이 `CLAUDE.md`/`AGENTS.md`의 관리 블록과 Claude Code 스킬을 설치하고 최신으로 유지한다. 모든 명령이 `--json`을 지원한다 |
 | **배포본 빌드** | `dist`가 테스트 모듈을 빼고 버전을 찍은 뒤, VBE 컴파일 검증까지 통과한 `.xlsm`/`.xlam`을 만든다 |
@@ -165,6 +171,7 @@ End Sub
 - 판정: 런타임 오류 없이 끝나고 실패한 단언이 0건이면 pass.
 - `src\LogShim.bas`는 `init`이 넣고 관리한다. 직접 고치지 않는다.
 - `Debug.Assert`는 헤드리스에서 아무 신호도 내지 않으므로 쓰지 않는다. 테스트 안에서 `MsgBox`·`InputBox`도 쓰지 않는다.
+- 기본 설정에서 테스트는 워크북을 읽기 전용으로 열어 실행한다. 테스트 안에서 워크북을 저장(`ThisWorkbook.Save`)하지 않는다.
 
 ## 명령
 
@@ -174,8 +181,8 @@ End Sub
 | `init [--check]` | 관리 파일(규칙 블록, 스킬, `LogShim.bas`) 설치·갱신. `--check`는 검사만 한다 |
 | `doctor [--fix] [--kill-orphans]` | 환경 점검. `--fix`는 AccessVBOM을 켜고, `--kill-orphans`는 창 없이 남은 자동화 Excel을 정리한다(먼저 `doctor`로 대상 확인) |
 | `status` | 세션 상태, src가 워크북에 반영됐는지 |
-| `session start\|attach\|stop` | Excel 세션 시작, 이미 열린 워크북 채택, 종료(`--no-save`, `--discard`) |
-| `push [--force] [--prune]` | src를 워크북에 반영 |
+| `session start\|attach\|stop` | 계속 띄워 두는 Excel 세션 시작, 이미 열린 워크북 채택, 종료(`--no-save`, `--discard`) |
+| `push [--force] [--prune] [--skip-compile]` | src를 워크북에 반영. 컴파일이 통과해야 저장한다 |
 | `pull [--force]` | 워크북 코드를 src로 가져오기 |
 | `diff [--module <이름>]` | 워크북과 src 비교(아무것도 바꾸지 않음) |
 | `test [--timeout <초>]` | `Test_*` 테스트 실행 |
@@ -203,10 +210,14 @@ name = "MyProject"
 
 [excel]
 workbook = "MyProject.xlsm"
-visible = true
+visible = true            # session start로 띄운 Excel을 화면에 보일지
+session = "ephemeral"     # ephemeral(기본, 명령마다 숨은 Excel) | persistent(Excel을 계속 띄워 둠)
 
 [src]
 root = "src"
+
+[push]                    # 선택
+compile = true            # false면 push 전 컴파일 검사를 끈다(기존 컴파일 오류가 있는 워크북용)
 
 [dist]                    # 선택
 version = "1.0.0"
@@ -221,8 +232,10 @@ keep = 10                 # 0이면 push 전 백업 끔
 - src 파일 규약: UTF-8(BOM 없음) + CRLF + 파일 끝 개행 1개.
 - 프로시저 수준 Attribute(매크로 단축키 등)는 src와 워크북을 오가며 보존되지 않는다. 단축키는 `Application.OnKey`로 등록한다.
 - 폼의 `.frx`(그림 등)만 바뀐 경우 push가 변경을 감지하지 못할 수 있다. 이때는 `push --force-form-import`로 반영한다.
-- 테스트 중 뜬 `MsgBox`/`InputBox`/파일 대화상자는 자동으로 닫히지 않는다. 테스트는 시간 제한에 걸려 끝나고, Excel은
-  격리될 수 있다. `recovery status`로 상태를 확인하고 안내를 따른다.
+- 테스트 중 뜬 `MsgBox`/`InputBox`/파일 대화상자는 자동으로 닫히지 않는다. 테스트는 시간 제한에 걸려 끝난다. 일회용
+  Excel은 도구가 정리하지만, 계속 띄워 둔 세션의 Excel은 격리될 수 있다. `recovery status`로 상태를 확인하고 안내를 따른다.
+- push 전 컴파일 검사는 일회용 Excel에서만 돈다. `session start`·`session attach`로 연 Excel에서는 건너뛰고, 컴파일
+  오류는 test 결과로 보고된다.
 
 ## 보안
 
