@@ -216,7 +216,7 @@ public class SetupPlanTests
 
         Assert.False(r.Ready);
         Assert.Null(r.Project);
-        Assert.Contains(r.Blockers, b => b.Contains("안쪽"));
+        Assert.Contains(r.Blockers, b => b.Contains("inside another vbaloop project"));
     }
 
     [Fact]

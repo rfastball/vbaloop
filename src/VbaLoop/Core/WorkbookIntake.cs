@@ -38,24 +38,24 @@ public static class WorkbookIntake
         string ext = Path.GetExtension(path).ToLowerInvariant();
 
         if (name.StartsWith("~$"))
-            throw new CliError($"Excel 잠금 파일임(~$로 시작): {name}",
-                "~$ 없는 실제 워크북 파일을 고르세요");
+            throw new CliError($"this is an Excel lock file (starts with ~$): {name}",
+                "pick the real workbook file without the ~$ prefix");
         switch (ext)
         {
             case ".xlsm":
                 break;
             case ".xlsx" or ".xls" or ".xlsb":
-                throw new CliError($"{ext} 워크북은 지원하지 않음: {name}",
-                    "Excel에서 '다른 이름으로 저장' > Excel 매크로 사용 통합 문서(*.xlsm)로 저장한 뒤 그 파일로 다시 실행");
+                throw new CliError($"{ext} workbooks are not supported: {name}",
+                    "in Excel, use 'Save As' > Excel Macro-Enabled Workbook (*.xlsm), then rerun with that file");
             case ".xlam":
-                throw new CliError($"애드인(.xlam)은 개발 원본으로 쓸 수 없음: {name}",
-                    "애드인의 원본 .xlsm으로 setup하고, 애드인은 vbaloop dist --out <이름>.xlam으로 빌드");
+                throw new CliError($"an add-in (.xlam) cannot be used as the development source: {name}",
+                    "run setup with the add-in's source .xlsm, and build the add-in with vbaloop dist --out <name>.xlam");
             default:
-                throw new CliError($"Excel 매크로 워크북(.xlsm)이 아님: {name}",
-                    "vbaloop setup --workbook <경로.xlsm>");
+                throw new CliError($"not an Excel macro workbook (.xlsm): {name}",
+                    "vbaloop setup --workbook <path.xlsm>");
         }
         if (!File.Exists(path))
-            throw new CliError($"워크북 파일을 찾지 못함: {path}", "경로를 확인한 뒤 다시 실행");
+            throw new CliError($"workbook file not found: {path}", "check the path, then rerun");
         return path;
     }
 
@@ -90,14 +90,14 @@ public static class WorkbookIntake
                 Slot.Reusable => new Plan(Kind.Reuse, folder, name, source),
                 Slot.Free => new Plan(Kind.Copy, folder, name, source),
                 Slot.OtherWorkbook => throw new CliError(
-                    $"지정 폴더에 다른 워크북(*.xlsm)이 있음: {folder}",
-                    "빈 폴더를 지정하거나 --folder를 빼서 원본 옆에 새 폴더를 만들게 하세요"),
+                    $"the specified folder contains another workbook (*.xlsm): {folder}",
+                    "specify an empty folder, or omit --folder to create a new folder next to the original"),
                 Slot.NotADirectory => throw new CliError(
-                    $"지정 경로가 폴더가 아니라 파일임: {folder}",
-                    "폴더 경로를 지정하거나 --folder를 빼서 원본 옆에 새 폴더를 만들게 하세요"),
+                    $"the specified path is a file, not a folder: {folder}",
+                    "specify a folder path, or omit --folder to create a new folder next to the original"),
                 _ => throw new CliError(
-                    $"지정 폴더에 같은 이름의 다른 워크북이 있음: {Path.Combine(folder, name)}",
-                    "덮어쓰지 않습니다 — 다른 폴더를 지정하거나 그 파일을 치운 뒤 다시 실행"),
+                    $"the specified folder contains a different workbook with the same name: {Path.Combine(folder, name)}",
+                    "will not overwrite — specify another folder or remove that file, then rerun"),
             };
         }
 
@@ -115,8 +115,8 @@ public static class WorkbookIntake
             }
             // Free(관계없는 파일이 든 폴더)·OtherWorkbook·Conflict는 남의 폴더일 수 있어 건너뛴다
         }
-        throw new CliError($"사본 폴더 이름을 정하지 못함: {baseFolder} (2)~(99)가 모두 사용 중",
-            "vbaloop setup --workbook <경로> --folder <빈 폴더>");
+        throw new CliError($"could not choose a copy folder name: {baseFolder} (2)~(99) are all in use",
+            "vbaloop setup --workbook <path> --folder <empty folder>");
     }
 
     /// <summary>Copy 계획을 실행한다. 사본의 읽기 전용 특성은 해제한다 — push가 저장할 수 없게 되므로.</summary>
@@ -131,8 +131,8 @@ public static class WorkbookIntake
         }
         catch (IOException e)
         {
-            throw new CliError($"워크북 복사 실패: {e.Message}",
-                "원본을 Excel에서 닫은 뒤 다시 실행");
+            throw new CliError($"workbook copy failed: {e.Message}",
+                "close the original in Excel, then rerun");
         }
         var attrs = File.GetAttributes(dest);
         if ((attrs & FileAttributes.ReadOnly) != 0)
@@ -144,13 +144,13 @@ public static class WorkbookIntake
         if (HasToml(folder))
         {
             if (!TomlPointsTo(folder, name))
-                throw new CliError($"이 폴더의 vbaloop.toml은 다른 워크북을 가리킴: {folder}",
-                    "vbaloop.toml의 [excel].workbook을 확인하거나, --folder <빈 폴더>로 따로 가져오세요");
+                throw new CliError($"vbaloop.toml in this folder points to a different workbook: {folder}",
+                    "check [excel].workbook in vbaloop.toml, or import separately with --folder <empty folder>");
         }
         else if (OtherWorkbooks(folder, name).Any())
         {
-            throw new CliError($"폴더에 다른 워크북(*.xlsm)도 있어 그 자리에서 쓸 수 없음: {folder}",
-                "--folder를 빼면 원본 옆 새 폴더에 사본을 만들어 진행합니다");
+            throw new CliError($"the folder also contains another workbook (*.xlsm), so it cannot be used in place: {folder}",
+                "omit --folder to proceed with a copy in a new folder next to the original");
         }
         return new Plan(Kind.InPlace, folder, name, source);
     }

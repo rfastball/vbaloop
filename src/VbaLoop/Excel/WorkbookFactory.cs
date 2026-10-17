@@ -16,7 +16,7 @@ public static class WorkbookFactory
     public static void CreateMacroWorkbook(string path)
     {
         if (File.Exists(path))
-            throw new CliError($"이미 존재하는 파일: {path}", "다른 폴더를 고르거나 기존 워크북을 사용");
+            throw new CliError($"File already exists: {path}", "Choose another folder or use the existing workbook");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         var filter = OleMessageFilter.Register();

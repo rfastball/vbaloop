@@ -57,7 +57,7 @@ public class OrphanFilterTests
     {
         var v = OrphanFilter.Classify(Candidate(quarantined: true, tool: true), MySession);
         Assert.False(v.Killable);
-        Assert.Contains("격리", v.Reason);
+        Assert.Contains("quarantined", v.Reason);
     }
 
     [Fact]

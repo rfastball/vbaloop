@@ -24,20 +24,20 @@ public static class OrphanFilter
     public static OrphanVerdict Classify(OrphanCandidate c, int currentWindowsSessionId)
     {
         if (c.HasMainWindow)
-            return new(false, "창 있음(사람/세션 소유로 간주)");
+            return new(false, "has windows (treated as user/session owned)");
         if (c.IsLiveProjectSession)
-            return new(false, "현재 프로젝트의 세션");
+            return new(false, "session of the current project");
         if (c.Quarantined)
-            return new(false, "격리 중인 Excel — 사용자 확인 필요(vbaloop recovery status)");
+            return new(false, "quarantined Excel — needs user confirmation (vbaloop recovery status)");
         if (c.WindowsSessionId != currentWindowsSessionId)
-            return new(false, $"다른 Windows 세션({c.WindowsSessionId}) — 다른 사용자/RDS 소유 가능성");
+            return new(false, $"other Windows session ({c.WindowsSessionId}) — possibly owned by another user/RDS");
         if (c.CommandLine == null)
-            return new(false, "명령줄 판독 불가(권한) — 소유 판별 불가");
+            return new(false, "command line unreadable (permissions) — cannot determine owner");
         if (!IsAutomationLaunch(c.CommandLine))
-            return new(false, "/automation 기동 아님 — OLE 임베디드(Word/PowerPoint 등) 또는 사용자 실행 가능성");
+            return new(false, "not launched with /automation — possibly OLE-embedded (Word/PowerPoint etc.) or user-launched");
         return new(true, c.ToolLaunched
-            ? "vbaloop가 띄운 창 없는 자동화 Excel"
-            : "창 없는 자동화 Excel(다른 자동화 도구 소유일 수 있음)");
+            ? "windowless automation Excel launched by vbaloop"
+            : "windowless automation Excel (may be owned by another automation tool)");
     }
 
     /// <summary>

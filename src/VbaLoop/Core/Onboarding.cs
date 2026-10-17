@@ -170,7 +170,7 @@ public static class Onboarding
             Status = ArtifactStatus.Drift,
             NewContent = ManagedStamp.Upsert(text, stampVersion),
             Detail = existing == null
-                ? $"managed_by {stampVersion} 기록"
+                ? $"managed_by {stampVersion} recorded"
                 : $"managed_by {existing} -> {stampVersion}",
         };
     }
@@ -206,10 +206,10 @@ public static class Onboarding
         return candidates.Count switch
         {
             1 => candidates[0],
-            0 => throw new CliError($"워크북(*.xlsm)을 찾지 못함: {root}",
-                "vbaloop.toml 수동 생성 후 vbaloop init 재실행"),
-            _ => throw new CliError($"워크북 후보가 복수임: {string.Join(", ", candidates)}",
-                "vbaloop.toml 수동 생성 후 vbaloop init 재실행"),
+            0 => throw new CliError($"No workbook (*.xlsm) found: {root}",
+                "Create vbaloop.toml manually, then rerun vbaloop init"),
+            _ => throw new CliError($"Multiple workbook candidates: {string.Join(", ", candidates)}",
+                "Create vbaloop.toml manually, then rerun vbaloop init"),
         };
     }
 

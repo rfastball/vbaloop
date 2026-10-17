@@ -48,8 +48,8 @@ public static class SessionService
     public static EnsureResult? AdoptExisting(ProjectConfig cfg, ToolLog log, string command)
     {
         if (!File.Exists(cfg.WorkbookPath))
-            throw new CliError($"워크북 파일 없음: {cfg.WorkbookPath}",
-                "vbaloop.toml의 [excel].workbook 경로 확인");
+            throw new CliError($"Workbook file not found: {cfg.WorkbookPath}",
+                "Check the [excel].workbook path in vbaloop.toml");
 
         // 격리 게이트(설계 §11): 마커가 있으면 Inspect(=COM 탐침) 전에 exit 3
         RecoveryGate.Enforce(cfg, log);
@@ -131,9 +131,9 @@ public static class SessionService
                 {
                     log.Write("error", "session_readonly_refused", new { workbook = cfg.WorkbookPath });
                     throw new CliError(
-                        $"워크북이 read-only로 열림 — 다른 프로세스가 파일 쓰기 잠금 보유 의심(사용자가 Excel에서 열어둔 경우 포함): {cfg.WorkbookPath}",
-                        "사용자가 이 워크북을 Excel에서 열어둔 것이면 사용자 확인 후 vbaloop session attach로 그 Excel을 채택"
-                        + " — 아니면 vbaloop doctor로 잠금 보유 프로세스 진단(정리 여부는 사용자가 판단)",
+                        $"Workbook opened read-only — another process may hold the file write lock (including the user having it open in Excel): {cfg.WorkbookPath}",
+                        "If the user has this workbook open in Excel, after the user confirms adopt that Excel with vbaloop session attach"
+                        + " — otherwise diagnose the lock-holding process with vbaloop doctor (the user decides whether to clean it up)",
                         environment: true);
                 }
 
@@ -218,11 +218,11 @@ public static class SessionService
         switch (info.State)
         {
             case SessionState.None:
-                throw new CliError("활성 세션이 없음", "session start", environment: true);
+                throw new CliError("No active session", "session start", environment: true);
             case SessionState.Poisoned:
-                throw new CliError($"세션이 오염됨: {info.Detail}", "session start", environment: true);
+                throw new CliError($"Session poisoned: {info.Detail}", "session start", environment: true);
             case SessionState.Stale:
-                throw new CliError($"세션이 stale: {info.Detail}", "session start", environment: true);
+                throw new CliError($"Session stale: {info.Detail}", "session start", environment: true);
             case SessionState.Busy:
                 throw BusyError(info);
         }
@@ -235,8 +235,8 @@ public static class SessionService
 
     /// <summary>busy 세션 — 재시도 가능한 환경 오류(exit 3). stale로 취급해 정리하지 않는다.</summary>
     public static CliError BusyError(SessionInfo info)
-        => new($"세션 Excel(PID {info.Meta?.Pid})이 busy — 호출 거절 중(셀 편집 중이거나 대화상자가 열려 있음): {info.Detail}",
-            "Excel에서 셀 편집/열린 대화상자를 마친 뒤 같은 명령 재시도", environment: true);
+        => new($"Session Excel (PID {info.Meta?.Pid}) is busy — rejecting calls (cell edit mode or a dialog is open): {info.Detail}",
+            "Excel is in cell edit mode or showing a dialog; retry the same command shortly", environment: true);
 
     /// <summary>세션의 대상 워크북 객체를 찾는다. 닫혀 있으면 CliError.</summary>
     public static dynamic FindWorkbook(dynamic app, string workbookFullName)
@@ -249,7 +249,7 @@ public static class SessionService
             if (string.Equals(full, workbookFullName, StringComparison.OrdinalIgnoreCase))
                 return wb;
         }
-        throw new CliError($"세션에 대상 워크북이 열려 있지 않음: {workbookFullName}", "session start",
+        throw new CliError($"Target workbook is not open in the session: {workbookFullName}", "session start",
             environment: true);
     }
 
@@ -287,8 +287,8 @@ public static class SessionService
         catch (COMException ex)
         {
             throw new CliError(
-                $"VBProject 접근 실패 (0x{ex.HResult:X8}) — VBIDE 신뢰 액세스(AccessVBOM) 미설정 가능성",
-                "Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스' 체크");
+                $"VBProject access failed (0x{ex.HResult:X8}) — VBIDE trusted access (AccessVBOM) may not be enabled",
+                "Excel Options > Trust Center > Macro Settings > check 'Trust access to the VBA project object model'");
         }
     }
 

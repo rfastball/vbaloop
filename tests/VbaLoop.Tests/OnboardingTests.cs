@@ -56,7 +56,7 @@ public class OnboardingTests
     {
         using var t = new TempDir();
         var e = Assert.Throws<CliError>(() => Onboarding.InferWorkbook(t.Path));
-        Assert.Contains("찾지 못함", e.Message);
+        Assert.Contains("No workbook", e.Message);
     }
 
     [Fact]

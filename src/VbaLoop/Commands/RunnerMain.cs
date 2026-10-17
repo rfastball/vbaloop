@@ -108,7 +108,7 @@ public static class RunnerMain
                         tests.Add(new
                         {
                             name = sub, module, result = RunnerVerdict.Skipped,
-                            detail = $"세션 종료로 미실행(에러는 오탐: {ex.Message})",
+                            detail = $"not run because the session ended (error was a false positive: {ex.Message})",
                         });
                         next++;
                         break;
@@ -119,7 +119,7 @@ public static class RunnerMain
                         ok = false,
                         poison = true,
                         sessionDied = false,
-                        error = $"test {full}: 치명적 COM 오류: {ex.Message}",
+                        error = $"test {full}: fatal COM error: {ex.Message}",
                         hint = "session start",
                         tests,
                         summary = new { pass, fail, skipped },
@@ -157,7 +157,7 @@ public static class RunnerMain
 
                 var failedAsserts = ReadFailedAsserts(jsonlPath, offset);
                 string? modalDetail = myModals.Count > 0
-                    ? $"모달 자동 해제({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
+                    ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
                     : null;
                 var (result, detail) = RunnerVerdict.Decide(error, failedAsserts, modalDetail, deadNow);
                 if (result == RunnerVerdict.Pass) pass++;
@@ -181,7 +181,7 @@ public static class RunnerMain
                 skipped++;
                 tests.Add(new
                 {
-                    name = sub, module, result = RunnerVerdict.Skipped, detail = "세션 종료로 미실행",
+                    name = sub, module, result = RunnerVerdict.Skipped, detail = "not run because the session ended",
                 });
             }
 
@@ -240,7 +240,7 @@ public static class RunnerMain
         ModalWatchdog watchdog, List<object> watchdogEvents, string wbName, string jsonlPath)
     {
         if (!MacroName.TryParse(macroSpec, out var module, out var proc, out var nameError))
-            throw new CliError(nameError!, "형식: vbaloop run Module.Proc");
+            throw new CliError(nameError!, "Format: vbaloop run Module.Proc");
         string full = $"{module}.{proc}";
 
         AppendMarker(jsonlPath, "run_start", full, runId, null);
@@ -263,7 +263,7 @@ public static class RunnerMain
                 ok = false,
                 poison = true,
                 sessionDied = false,
-                error = $"run {full}: 치명적 COM 오류: {ex.Message}",
+                error = $"run {full}: fatal COM error: {ex.Message}",
                 hint = "session start",
                 watchdog = watchdogEvents,
             });
@@ -292,9 +292,9 @@ public static class RunnerMain
         AppendMarker(jsonlPath, "run_end", full, runId, result);
 
         string? detail = modalHit
-            ? $"모달 자동 해제({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
+            ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
               + (error != null ? $" | COM: {error}" : "")
-            : error != null ? $"런타임 에러: {error}" : null;
+            : error != null ? $"runtime error: {error}" : null;
 
         var (returnValue, returnType) = SerializeReturn(rawReturn);
 
@@ -352,10 +352,10 @@ public static class RunnerMain
         if (Marshal.IsComObject(raw))
         {
             Marshal.ReleaseComObject(raw);
-            return (null, "Object(COM) — 원시 타입만 반환 가능");
+            return (null, "Object(COM) — only primitive types can be returned");
         }
         if (raw is Array arr)
-            return ($"Array(길이 {arr.Length})", "Array");
+            return ($"Array(length {arr.Length})", "Array");
         return (raw.ToString(), raw.GetType().Name);
     }
 
@@ -368,7 +368,7 @@ public static class RunnerMain
         body = Truncate(e.Body, 500),
         dismissal = e.Dismissal,
         // 현재 테스트 시작 전에 남아 있던 이전 구간의 잔여 모달임을 표기 (귀속 혼동 방지)
-        stale = staleFor != null ? $"{staleFor} 시작 전 잔여 모달" : null,
+        stale = staleFor != null ? $"leftover modal before {staleFor} started" : null,
     };
 
     private static string Truncate(string s, int max)

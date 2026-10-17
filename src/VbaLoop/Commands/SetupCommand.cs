@@ -33,8 +33,8 @@ public static class SetupCommand
         // --workbook + --folder만 예외로 허용한다(사본을 둘 폴더 지정). 환경 점검 전에 거른다.
         if (opts.NewName != null && (opts.Workbook != null || opts.Folder != null))
         {
-            o.Fail("--new는 --workbook·--folder와 함께 쓸 수 없음",
-                "새 프로젝트: vbaloop setup --new <이름> (cwd 아래 생성) / 기존 워크북: vbaloop setup --workbook <경로.xlsm>");
+            o.Fail("--new cannot be combined with --workbook or --folder",
+                "New project: vbaloop setup --new <name> (created under cwd) / existing workbook: vbaloop setup --workbook <path.xlsm>");
             return o;
         }
         // 잘못 끌어다 놓은 파일·쓸 수 없는 이름은 설치·AccessVBOM 변경 전에 거른다(CliError → 봉투)
@@ -54,30 +54,30 @@ public static class SetupCommand
         if (opts.Plan)
             return PlanOnly(opts, givenWorkbook, givenNewFolder, o);
 
-        Say(opts.InstallOnly ? "vbaloop setup --install-only — exe 설치/갱신" : "vbaloop setup — 개발환경 마법사");
+        Say(opts.InstallOnly ? "vbaloop setup --install-only — install/update exe" : "vbaloop setup — development environment wizard");
         Say();
 
-        // ── [1] 환경 점검 ───────────────────────────────────────────────
-        Say($"[1/{total}] 환경 점검");
+        // ── [1] Environment check ───────────────────────────────────────────────
+        Say($"[1/{total}] Environment check");
         string? curVer = null;
         var progType = Type.GetTypeFromProgID("Excel.Application");
         if (progType == null)
         {
-            Say("  FAIL Excel: Excel.Application ProgID 없음");
-            o.Fail("Excel이 설치돼 있지 않음 (Excel.Application ProgID 없음)",
-                "Excel 데스크톱 버전을 설치한 뒤 다시 실행 (Microsoft 365 웹/모바일은 COM 자동화 불가)",
+            Say("  FAIL Excel: Excel.Application ProgID missing");
+            o.Fail("Excel is not installed (Excel.Application ProgID missing)",
+                "Install desktop Excel and rerun (Microsoft 365 web/mobile do not support COM automation)",
                 environment: true);
             return o;
         }
         using (var curVerKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"Excel.Application\CurVer"))
             curVer = curVerKey?.GetValue(null) as string;
-        Say($"  ok   Excel: {curVer ?? "버전 미상"}");
+        Say($"  ok   Excel: {curVer ?? "version unknown"}");
 
         bool oleacc = CanLoadOleacc();
         if (!oleacc)
         {
-            Say("  FAIL oleacc.dll 로드 실패");
-            o.Fail("oleacc.dll을 로드할 수 없음 — Windows 구성 손상", "vbaloop doctor로 상세 점검",
+            Say("  FAIL oleacc.dll failed to load");
+            o.Fail("Cannot load oleacc.dll — Windows installation damaged", "Run vbaloop doctor for details",
                 environment: true);
             return o;
         }
@@ -85,7 +85,7 @@ public static class SetupCommand
 
         // ── [2/6] AccessVBOM — 꺼져 있으면 아무것도 동작하지 않는 진짜 첫 관문 ──
         Say();
-        Say($"[2/{total}] VBA 프로젝트 개체 모델 접근(AccessVBOM)");
+        Say($"[2/{total}] VBA project object model access (AccessVBOM)");
         var (vbomOk, vbomDetail, _) = AccessVbom.Detect();
         bool vbomFixed = false;
         if (vbomOk)
@@ -95,19 +95,19 @@ public static class SetupCommand
         else
         {
             Say($"  FAIL {vbomDetail}");
-            Say("       이 설정이 꺼져 있으면 vbaloop의 push/pull/test가 전부 실패합니다.");
+            Say("       If this setting is off, vbaloop push/pull/test all fail.");
             // 보안 설정이라 동의는 두 가지로만 받는다: 사람이 프롬프트에 답하거나, 사용자 동의를 받은
             // 에이전트가 --enable-vbom을 명시하거나. --yes(프롬프트 생략)는 이 동의를 대신하지 않는다.
             bool canAsk = !opts.Yes && !opts.Json && ConsoleHost.CanPrompt;
             bool agree = opts.EnableVbom
-                         || (canAsk && ConsoleHost.Confirm("       지금 켤까요?", defaultYes: true, fallback: false));
+                         || (canAsk && ConsoleHost.Confirm("       Turn it on now?", defaultYes: true, fallback: false));
             if (!agree)
             {
-                o.Fail("AccessVBOM이 비활성 상태 — 설정 없이는 진행할 수 없음",
+                o.Fail("AccessVBOM is disabled — cannot proceed without it",
                     canAsk
-                        ? "Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스' 체크 후 재실행"
-                        : "보안 설정 변경이라 사용자 동의가 필요: 사용자에게 묻고 동의하면 같은 명령에 --enable-vbom을 붙여 재실행 "
-                          + "(또는 사용자가 Excel 옵션 > 보안 센터 > 매크로 설정에서 직접 체크)",
+                        ? "Check 'Trust access to the VBA project object model' in Excel Options > Trust Center > Macro Settings, then rerun"
+                        : "This changes a security setting and needs user consent: ask the user, and if they agree rerun the same command with --enable-vbom "
+                          + "(or the user checks it in Excel Options > Trust Center > Macro Settings)",
                     environment: true);
                 o.Payload = new { consentRequired = new[] { "accessVbom" }, approveFlag = "--enable-vbom", detail = vbomDetail };
                 return o;
@@ -119,28 +119,28 @@ public static class SetupCommand
 
         // ── [3/6] 설치: exe를 고정 폴더로 + PATH 등록 ────────────────────
         Say();
-        Say($"[3/{total}] 설치");
+        Say($"[3/{total}] Install");
         bool copied = false, pathAdded = false;
         if (opts.NoInstall)
         {
-            Say("  skip --no-install (현재 exe를 그대로 사용)");
+            Say("  skip --no-install (using the current exe as is)");
         }
         else
         {
             (copied, string installedPath) = SelfInstall.CopySelf();
-            Say($"  ok   {installedPath}{(copied ? "" : " (이미 이 경로에서 실행 중)")}");
+            Say($"  ok   {installedPath}{(copied ? "" : " (already running from this path)")}");
             pathAdded = SelfInstall.EnsureOnPath();
             Say(pathAdded
-                ? $"  ok   PATH 등록: {SelfInstall.InstallDir}"
-                : $"  ok   PATH 이미 등록됨: {SelfInstall.InstallDir}");
+                ? $"  ok   PATH registered: {SelfInstall.InstallDir}"
+                : $"  ok   PATH already registered: {SelfInstall.InstallDir}");
         }
 
         if (opts.InstallOnly)
         {
             Say();
-            Say("설치 완료. 프로젝트에 하네스를 얹으려면: vbaloop setup");
+            Say("Install complete. To add the harness to a project: vbaloop setup");
             if (pathAdded)
-                Say("주의: PATH는 새로 여는 셸부터 반영됩니다 — 지금 열려 있는 터미널은 재시작하세요.");
+                Say("Note: PATH takes effect only in newly opened shells — restart any terminal that is already open.");
             o.Payload = new
             {
                 installOnly = true,
@@ -154,11 +154,11 @@ public static class SetupCommand
             return o;
         }
 
-        // ── [4/6] 프로젝트 폴더 ─────────────────────────────────────────
+        // ── [4/6] Project folder ─────────────────────────────────────────
         // 기존 워크북을 받으면(드래그 앤 드롭/--workbook/파일 선택) 폴더는 도구가 정한다 —
         // 사용자가 빈 폴더를 만들어 워크북을 혼자 넣어 두는 준비 단계를 없앤다(원본은 불변).
         Say();
-        Say("[4/6] 프로젝트 폴더");
+        Say("[4/6] Project folder");
         var (workbookArg, newFolder, chosenFolder) = givenNewFolder != null || givenWorkbook != null
             ? (givenWorkbook, givenNewFolder, (string?)null)
             : ChooseStart(opts, Say);
@@ -170,8 +170,8 @@ public static class SetupCommand
             folder = newFolder;
             ProjectRoot.EnsureNotNested(folder); // 대화형으로 고른 경우(현재 폴더·이름 입력)도 여기서 걸린다
             Say(Directory.Exists(folder)
-                ? "  ok   빈 폴더를 새 프로젝트로 씁니다"
-                : "  ok   새 프로젝트 폴더를 만들었습니다");
+                ? "  ok   using the empty folder as the new project"
+                : "  ok   created the new project folder");
             Directory.CreateDirectory(folder);
         }
         else if (workbookArg != null)
@@ -183,12 +183,12 @@ public static class SetupCommand
             folder = plan.Folder;
             intakeWorkbook = plan.WorkbookName;
             intakeKind = plan.Kind;
-            Say($"  원본: {source}");
+            Say($"  source: {source}");
             Say(plan.Kind switch
             {
-                WorkbookIntake.Kind.Copy => "  ok   사본을 만들었습니다 (원본은 그대로 둡니다)",
-                WorkbookIntake.Kind.Reuse => "  ok   이전에 만든 개발 폴더를 재사용합니다 (원본의 이후 변경은 반영되지 않음)",
-                _ => "  ok   이미 vbaloop 프로젝트 안의 워크북입니다 — 그 자리에서 사용합니다",
+                WorkbookIntake.Kind.Copy => "  ok   created a copy (the original is left untouched)",
+                WorkbookIntake.Kind.Reuse => "  ok   reusing the previously created dev folder (later changes to the original are not picked up)",
+                _ => "  ok   workbook is already inside a vbaloop project — using it in place",
             });
         }
         else
@@ -196,8 +196,8 @@ public static class SetupCommand
             string? picked = chosenFolder ?? ResolveFolder(opts, Say);
             if (picked == null)
             {
-                o.Fail("프로젝트 폴더가 지정되지 않음",
-                    "vbaloop setup --workbook <경로.xlsm> 또는 vbaloop setup --folder <경로>");
+                o.Fail("Project folder not specified",
+                    "vbaloop setup --workbook <path.xlsm> or vbaloop setup --folder <path>");
                 return o;
             }
             folder = Path.GetFullPath(picked);
@@ -206,9 +206,9 @@ public static class SetupCommand
         }
         Say($"  → {folder}");
 
-        // ── [5/6] 워크북 + 하네스 ───────────────────────────────────────
+        // ── [5/6] Workbook + harness ───────────────────────────────────────
         Say();
-        Say("[5/6] 워크북 + 하네스");
+        Say("[5/6] Workbook + harness");
         // 이미 프로젝트인 폴더(다시 세팅)는 toml이 정본이다 — 하위 폴더의 워크북이나 최상위 워크북 여러 개도
         // 설정된 것 하나로 확정한다. 스캔하면 엉뚱한 새 워크북을 만들거나 복수 후보로 실패한다.
         string? configured = intakeWorkbook == null ? ProjectRoot.ConfiguredWorkbook(folder) : null;
@@ -224,8 +224,8 @@ public static class SetupCommand
                 .ToList();
         if (existing.Count > 1)
         {
-            o.Fail($"워크북 후보가 복수임: {string.Join(", ", existing)}",
-                "가져올 워크북을 지정: vbaloop setup --workbook <경로.xlsm> (원본 옆 새 폴더에 사본을 만든다)");
+            o.Fail($"Multiple workbook candidates: {string.Join(", ", existing)}",
+                "Specify the workbook to import: vbaloop setup --workbook <path.xlsm> (a copy is made in a new folder next to the original)");
             return o;
         }
 
@@ -235,14 +235,14 @@ public static class SetupCommand
         {
             workbookName = new DirectoryInfo(folder).Name + ".xlsm";
             string wbPath = Path.Combine(folder, workbookName);
-            Say($"  ..   빈 매크로 워크북 생성: {workbookName}");
+            Say($"  ..   creating empty macro workbook: {workbookName}");
             WorkbookFactory.CreateMacroWorkbook(wbPath);
-            Say($"  ok   {workbookName} 생성");
+            Say($"  ok   created {workbookName}");
         }
         else
         {
             workbookName = existing[0];
-            Say($"  ok   기존 워크북 채택: {workbookName}");
+            Say($"  ok   adopted existing workbook: {workbookName}");
         }
 
         // init/push/pull/test는 cwd 기준으로 프로젝트를 찾는다 — 대상 폴더로 옮겨 놓고 부른다
@@ -255,7 +255,7 @@ public static class SetupCommand
             foreach (var line in initOut.HumanLines) Say($"  {line}");
             if (!initOut.Ok)
             {
-                o.Fail("온보딩(init) 실패: " + string.Join("; ", initOut.Errors), initOut.Hint,
+                o.Fail("onboarding (init) failed: " + string.Join("; ", initOut.Errors), initOut.Hint,
                     initOut.EnvironmentError); // exe-older 거부(exit 3, hint vbaloop update)를 보존
                 return o;
             }
@@ -273,13 +273,13 @@ public static class SetupCommand
                     Directory.CreateDirectory(srcRoot);
                     CanonicalText.WriteCanonical(samplePath, SampleProject.ModuleLines());
                     sampleWritten = true;
-                    Say($"  ok   {Path.GetRelativePath(folder, samplePath)} 샘플 생성");
+                    Say($"  ok   {Path.GetRelativePath(folder, samplePath)} sample created");
                 }
             }
 
             // ── [6/6] 검증 ──────────────────────────────────────────────
             Say();
-            Say("[6/6] 검증");
+            Say("[6/6] Verify");
             string verify;
             if (opts.SkipVerify)
             {
@@ -292,7 +292,7 @@ public static class SetupCommand
                 foreach (var line in pushOut.HumanLines) Say($"  {line}");
                 if (!pushOut.Ok)
                 {
-                    o.Fail("push 실패: " + string.Join("; ", pushOut.Errors), pushOut.Hint,
+                    o.Fail("push failed: " + string.Join("; ", pushOut.Errors), pushOut.Hint,
                         pushOut.EnvironmentError);
                     return o;
                 }
@@ -300,7 +300,7 @@ public static class SetupCommand
                 foreach (var line in testOut.HumanLines) Say($"  {line}");
                 if (!testOut.Ok)
                 {
-                    o.Fail("test 실패: " + string.Join("; ", testOut.Errors), testOut.Hint,
+                    o.Fail("test failed: " + string.Join("; ", testOut.Errors), testOut.Hint,
                         testOut.EnvironmentError);
                     return o;
                 }
@@ -312,7 +312,7 @@ public static class SetupCommand
                 foreach (var line in pullOut.HumanLines) Say($"  {line}");
                 if (!pullOut.Ok)
                 {
-                    o.Fail("pull 실패: " + string.Join("; ", pullOut.Errors), pullOut.Hint,
+                    o.Fail("pull failed: " + string.Join("; ", pullOut.Errors), pullOut.Hint,
                         pullOut.EnvironmentError);
                     return o;
                 }
@@ -322,29 +322,29 @@ public static class SetupCommand
             // ── 마무리 안내 ─────────────────────────────────────────────
             bool claudeCli = HasClaudeCli();
             Say();
-            Say("완료. 다음 단계:");
+            Say("Done. Next steps:");
             Say($"  cd {folder}");
-            Say("  claude          ← 이 폴더에서 코드 에이전트를 실행하면 vbaloop 루프를 바로 사용합니다");
+            Say("  claude          <- run a coding agent in this folder to use the vbaloop loop right away");
             if (!isNew)
-                Say("                    (기존 워크북 코드는 src\\ 로 내려받았습니다)");
+                Say("                    (existing workbook code was pulled into src\\)");
             if (pathAdded)
             {
                 Say();
-                Say("  주의: PATH는 새로 여는 셸부터 반영됩니다 — 지금 열려 있는 터미널은 재시작하세요.");
+                Say("  Note: PATH takes effect only in newly opened shells — restart any terminal that is already open.");
             }
             // 일회용 모드(기본)는 검증 명령이 끝나면 Excel도 닫힌다 — 세션이 남는 것은 persistent 모드뿐
             bool sessionOpen = verify != "skipped" && File.Exists(Path.Combine(folder, "_dbg", "session.json"));
             if (sessionOpen)
             {
                 Say();
-                Say("  참고: 검증을 위해 도구 소유 Excel 세션이 열려 있습니다(정상). 다음 명령이 재사용하며,");
-                Say("        지금 닫으려면 vbaloop session stop.");
+                Say("  Note: a tool-owned Excel session is open for verification (normal). The next command reuses it;");
+                Say("        to close it now, run vbaloop session stop.");
             }
             if (!claudeCli)
             {
                 Say();
-                Say("  참고: PATH에서 claude 실행 파일을 찾지 못했습니다. Claude Code가 없으면");
-                Say("        .claude\\skills\\vbaloop\\SKILL.md는 사용되지 않습니다(AGENTS.md는 유효).");
+                Say("  Note: the claude executable was not found on PATH. Without Claude Code,");
+                Say("        .claude\\skills\\vbaloop\\SKILL.md is not used (AGENTS.md still applies).");
             }
 
             // 마지막 관문(폴더 찾아가서 claude 실행)까지 마법사가 대신한다 — 대화형에서만 묻는다
@@ -352,13 +352,13 @@ public static class SetupCommand
             if (claudeCli && !opts.Yes && !opts.Json && ConsoleHost.CanPrompt)
             {
                 Say();
-                if (ConsoleHost.Confirm("지금 이 폴더에서 Claude Code를 새 창으로 열까요?", defaultYes: true, fallback: false))
+                if (ConsoleHost.Confirm("Open Claude Code in a new window in this folder now?", defaultYes: true, fallback: false))
                 {
                     string? launchError = LaunchClaude(folder);
                     claudeLaunched = launchError == null;
                     Say(claudeLaunched
-                        ? "  ok   Claude Code 창을 열었습니다. 예: \"Test_로 시작하는 테스트를 하나 만들고 돌려줘\""
-                        : $"  FAIL Claude Code 실행 실패: {launchError} — 위 안내대로 직접 실행하세요");
+                        ? "  ok   opened a Claude Code window. Example: \"Create one test whose name starts with Test_ and run it\""
+                        : $"  FAIL failed to launch Claude Code: {launchError} — run it manually as described above");
                 }
             }
 
@@ -409,19 +409,19 @@ public static class SetupCommand
             if (fromCwd.Workbook != null || fromCwd.NewFolder != null || fromCwd.Folder != null) return fromCwd;
         }
 
-        if (ConsoleHost.Confirm("  기존 워크북(.xlsm)을 가져올까요? (n = 새 빈 프로젝트)", defaultYes: true, fallback: false))
+        if (ConsoleHost.Confirm("  Import an existing workbook (.xlsm)? (n = new empty project)", defaultYes: true, fallback: false))
         {
-            say("  파일 선택 대화상자를 엽니다 (원본은 그대로 두고 옆에 사본 폴더를 만듭니다)");
-            string? picked = FilePicker.PickWorkbook("vbaloop로 가져올 워크북(.xlsm)을 고르세요")
-                ?? ConsoleHost.Ask("  워크북 경로 (이 창에 파일을 끌어다 놓아도 됨, 빈 줄 = 폴더 직접 선택):");
+            say("  Opening a file picker (the original is left untouched; a copy folder is created next to it)");
+            string? picked = FilePicker.PickWorkbook("Choose a workbook (.xlsm) to import into vbaloop")
+                ?? ConsoleHost.Ask("  Workbook path (you can drag a file into this window; empty line = pick a folder yourself):");
             return (picked, null, null);
         }
 
         string parent = ConsoleHost.IsOwnConsole() ? NewProjectFolder.ExplorerDefaultParent : Environment.CurrentDirectory;
-        say($"  새 프로젝트는 {parent}\\<이름> 에 만듭니다");
+        say($"  New project will be created at {parent}\\<name>");
         while (true)
         {
-            string? name = ConsoleHost.Ask("  프로젝트 이름 (빈 줄 = 준비된 폴더 직접 선택):");
+            string? name = ConsoleHost.Ask("  Project name (empty line = pick a prepared folder):");
             if (name == null) return (null, null, null);
             try
             {
@@ -440,7 +440,7 @@ public static class SetupCommand
         var here = CwdStart.Inspect(cwd);
         if (here.IsProject)
         {
-            if (ConsoleHost.Confirm("  현재 폴더는 이미 vbaloop 프로젝트입니다. 다시 세팅할까요? (관리 파일 갱신 + 검증)",
+            if (ConsoleHost.Confirm("  The current folder is already a vbaloop project. Set it up again? (refresh managed files + verify)",
                     defaultYes: true, fallback: false))
                 return (null, null, cwd);
         }
@@ -448,21 +448,21 @@ public static class SetupCommand
         {
             string name = here.Workbooks[0];
             if (ConsoleHost.Confirm(
-                    $"  현재 폴더의 {name}을(를) 가져올까요? (옆에 {Path.GetFileNameWithoutExtension(name)}\\ 폴더를 만들어 사본으로 작업)",
+                    $"  Import {name} from the current folder? (work on a copy in a new {Path.GetFileNameWithoutExtension(name)}\\ folder next to it)",
                     defaultYes: true, fallback: false))
                 return (Path.Combine(cwd, name), null, null);
         }
         else if (here.Workbooks.Count > 1)
         {
-            say("  현재 폴더의 워크북:");
+            say("  Workbooks in the current folder:");
             for (int i = 0; i < here.Workbooks.Count; i++) say($"    {i + 1}. {here.Workbooks[i]}");
             while (true)
             {
-                string? pick = ConsoleHost.Ask("  가져올 번호 (빈 줄 = 다른 방법):");
+                string? pick = ConsoleHost.Ask("  Number to import (empty line = another way):");
                 if (pick == null) break;
                 if (int.TryParse(pick, out int k) && k >= 1 && k <= here.Workbooks.Count)
                     return (Path.Combine(cwd, here.Workbooks[k - 1]), null, null);
-                say("  FAIL 목록에 있는 번호를 입력하세요");
+                say("  FAIL enter a number from the list");
             }
         }
         else if (here.IsEmpty)
@@ -472,7 +472,7 @@ public static class SetupCommand
             bool usable;
             try { NewProjectFolder.ValidateName(folderName); usable = true; }
             catch (CliError) { usable = false; }
-            if (usable && ConsoleHost.Confirm($"  현재 폴더({folderName})가 비어 있습니다. 여기에 새 프로젝트를 만들까요?",
+            if (usable && ConsoleHost.Confirm($"  The current folder ({folderName}) is empty. Create the new project here?",
                     defaultYes: true, fallback: false))
                 return (null, cwd, null);
         }
@@ -488,9 +488,9 @@ public static class SetupCommand
         if (opts.Folder != null) return opts.Folder;
         if (opts.Json || !ConsoleHost.CanPrompt) return null; // 비대화형에서 대화상자 금지
 
-        say("  폴더 선택 대화상자를 엽니다 (취소하면 경로를 직접 입력할 수 있습니다)");
-        string? picked = FolderPicker.Pick("vbaloop 개발환경을 얹을 프로젝트 폴더를 고르세요");
-        return picked ?? ConsoleHost.Ask("  프로젝트 폴더 경로:");
+        say("  Opening a folder picker (cancel to type the path instead)");
+        string? picked = FolderPicker.Pick("Choose the project folder for the vbaloop environment");
+        return picked ?? ConsoleHost.Ask("  Project folder path:");
     }
 
     /// <summary>
@@ -551,21 +551,21 @@ public static class SetupCommand
 
         if (!opts.Json)
         {
-            o.HumanLines.Add("vbaloop setup --plan (아무것도 바꾸지 않음)");
+            o.HumanLines.Add("vbaloop setup --plan (changes nothing)");
             o.HumanLines.Add("");
-            o.HumanLines.Add("할 일:");
+            o.HumanLines.Add("To do:");
             foreach (var c in plan.Changes) o.HumanLines.Add($"  - {c}");
             if (plan.Consents.Count > 0)
             {
                 o.HumanLines.Add("");
-                o.HumanLines.Add("동의가 필요한 항목:");
+                o.HumanLines.Add("Items needing consent:");
                 foreach (var c in plan.Consents)
                     o.HumanLines.Add($"  - [{c.Id}] {c.Reason}"
-                        + (c.ApproveFlag != null ? $" (동의 시 {c.ApproveFlag})" : "")
-                        + (c.DeclineFlag != null ? $" (거절 시 {c.DeclineFlag})" : ""));
+                        + (c.ApproveFlag != null ? $" (to approve: {c.ApproveFlag})" : "")
+                        + (c.DeclineFlag != null ? $" (to decline: {c.DeclineFlag})" : ""));
             }
             o.HumanLines.Add("");
-            o.HumanLines.Add($"실행할 명령: {plan.Command}");
+            o.HumanLines.Add($"Command to run: {plan.Command}");
         }
         return o;
     }
@@ -584,9 +584,9 @@ public static class SetupCommand
             folder,
             exe = noInstall ? Environment.ProcessPath : SelfInstall.InstalledExePath,
             agentDocs = new[] { Path.Combine(folder, "CLAUDE.md"), Path.Combine(folder, "AGENTS.md") },
-            continueHere = $"이 세션에서 이어가려면 {Path.Combine(folder, "CLAUDE.md")}(Codex는 AGENTS.md)의 vbaloop 블록과 "
-                           + $"{Path.Combine(folder, ".claude", "skills", "vbaloop", "SKILL.md")}를 읽고, "
-                           + $"이후 vbaloop 명령은 그 폴더에서 실행(또는 --config {ShellQuote.PowerShell(toml)})",
+            continueHere = $"To continue in this session, read the vbaloop block in {Path.Combine(folder, "CLAUDE.md")} (AGENTS.md for Codex) and "
+                           + $"{Path.Combine(folder, ".claude", "skills", "vbaloop", "SKILL.md")}, "
+                           + $"then run later vbaloop commands from that folder (or use --config {ShellQuote.PowerShell(toml)})",
             // 셸마다 문법이 달라(cmd의 cd /d·&&는 PowerShell 5.1에서 실패) 작업 폴더와 명령을 따로 주고,
             // 바로 실행할 수 있는 PowerShell 한 줄을 곁들인다
             newSession = DetectAgents().Select(a => new
@@ -597,7 +597,7 @@ public static class SetupCommand
                 powershell = $"Set-Location -LiteralPath {ShellQuote.PowerShell(folder)}; {a}",
             }).ToArray(),
             excelSession = sessionOpen
-                ? "검증용 도구 소유 Excel 세션이 열려 있음(정상) - 다음 명령이 재사용, 끝낼 때 vbaloop session stop"
+                ? "Tool-owned Excel session for verification is open (normal) - the next command reuses it; run vbaloop session stop when finished"
                 : null,
         };
     }

@@ -32,8 +32,8 @@ internal static class Program
             if (paths > 1)
             {
                 var multi = new Outcome { Command = "setup" };
-                multi.Fail($"워크북은 하나만 가져올 수 있음 (받은 파일 {paths}개)",
-                    "워크북 파일 하나만 끌어다 놓거나 vbaloop setup --workbook <경로.xlsm>");
+                multi.Fail($"only one workbook can be imported ({paths} files received)",
+                    "Drop a single workbook file, or run vbaloop setup --workbook <path.xlsm>");
                 Output.Print(multi, json: false);
                 ConsoleHost.PauseIfOwnConsole();
                 return multi.ExitCode;
@@ -111,7 +111,7 @@ internal static class Program
         }
         catch (Exception e)
         {
-            outcome.Fail($"내부 오류: {e.GetType().Name}: {e.Message}");
+            outcome.Fail($"internal error: {e.GetType().Name}: {e.Message}");
         }
 
         // opts.Json이 authoritative지만, --json이 값으로 소비됐거나 verb 위치에 온 경로까지
@@ -142,7 +142,7 @@ internal static class Program
     {
         ProjectRegistry.TryAdd(ProjectRegistry.DefaultPath, cfg.RootDir);
         if (ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy) != StampState.ExeOlder) return;
-        var w = $"{ManagedStamp.DescribeExeOlder(cfg.ManagedBy!, ExeVersion.Text)} - {ManagedStamp.UpdateHint} 권장 (init은 거부됨)";
+        var w = $"{ManagedStamp.DescribeExeOlder(cfg.ManagedBy!, ExeVersion.Text)} - {ManagedStamp.UpdateHint}; init is refused";
         if (!warnings.Contains(w)) warnings.Add(w);
     }
 
@@ -166,7 +166,7 @@ internal static class Program
         }
         catch (Exception e)
         {
-            outcome.Fail($"내부 오류: {e.GetType().Name}: {e.Message}");
+            outcome.Fail($"internal error: {e.GetType().Name}: {e.Message}");
         }
         Output.Print(outcome, json: false);
         ConsoleHost.PauseIfOwnConsole();
@@ -176,7 +176,7 @@ internal static class Program
     private static Outcome UnknownVerb(string verb)
     {
         var o = new Outcome { Command = verb };
-        o.Fail($"미지 명령: {verb}", "vbaloop help로 명령 목록 확인");
+        o.Fail($"unknown command: {verb}", "See the command list with vbaloop help");
         return o;
     }
 
@@ -184,42 +184,42 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version", "update [--check] [--yes] [--force]" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <name>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <title> | --list", "version", "update [--check] [--yes] [--force]" } };
         return o;
     }
 
     private static void PrintUsage() => Console.Error.WriteLine(UsageText());
 
     private static string UsageText() => """
-        vbaloop - Excel VBA 프로젝트를 위한 최소 에이전트 개발 루프
+        vbaloop - minimal agent development loop for Excel VBA projects
 
-        처음이라면: vbaloop setup   (환경 점검 -> 설치 -> 워크북/폴더 선택 -> 하네스 -> 검증)
-        기존 워크북: vbaloop.exe 위로 .xlsm을 끌어다 놓기 (원본 옆 <이름>\ 폴더에 사본을 만들어 작업)
-        새 프로젝트: vbaloop setup --new <이름>   (.\<이름>\ 에 워크북 + 샘플 테스트)
+        First time: vbaloop setup   (environment check -> install -> pick workbook/folder -> harness -> verify)
+        Existing workbook: drag the .xlsm onto vbaloop.exe (works on a copy in a <name>\ folder next to the original)
+        New project: vbaloop setup --new <name>   (workbook + sample test in .\<name>\)
 
-        사용법:
-          vbaloop setup   [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --workbook은 기존 워크북 사본으로, --new는 .\<이름>\ 새 프로젝트로 시작, --plan은 변경 없이 계획만, --enable-vbom은 AccessVBOM 변경 동의(--yes에 미포함), --install-only는 exe 설치만)
-          vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 등록된 전 프로젝트 일괄)
-          vbaloop doctor  [--json] [--kill-orphans] [--fix]  환경 점검 + 고아 Excel 리포트(kill/fix는 명시 시)
-          vbaloop status  [--json]                 세션/프로젝트 상태
-          vbaloop diff    [--json] [--module <이름>]  워크북 VBProject vs src 읽기 전용 비교 (일회용 모드는 읽기 전용 Excel, persistent는 활성 세션 필요)
-          vbaloop session start|stop [--no-save] [--discard]   유지되는 도구 소유 Excel 세션 시작/종료 (기본 일회용 모드에선 선택, --discard: 저장 없이 버리고 격리 해제)
-          vbaloop session attach                   사용자가 이미 연 정본 워크북을 채택 (stop은 분리만, Excel 종료/저장 안 함)
-          vbaloop recovery status|clear [--force]  격리 상태 확인/해제 (clear는 격리된 Excel 종료 확인 후에만, --force는 경고와 함께)
-          vbaloop pull    [--json] [--force]       워크북 -> src (동기화 안 된 src 편집 시 차단)
-          vbaloop push    [--json] [--force] [--prune] [--force-form-import] [--skip-compile]   src -> 워크북 (in-place 주입 -> VBE 컴파일 통과 시 저장, --force는 지문 캐시 우회 전량 재주입)
-          vbaloop test    [--json] [--timeout N]   Test_* 프로시저 실행/판독
-          vbaloop run     <Module.Proc> [--timeout N]   임의 매크로 단건 실행
-          vbaloop dist    [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   클린 사본 배포 빌드(§9, 게시 전 VBE 컴파일 검증, .xlam도 지원)
-          vbaloop rollback --list | --latest | --backup <id> [--json]   push 전 백업으로 워크북 복원 (유지 세션 종료 상태에서만)
-          vbaloop lease   acquire|release|status|break [--force]   다중 에이전트 lease
-          vbaloop lint    [--json]                 규약/인코딩/헤더 전수 검사 (Excel 불필요)
-          vbaloop bugreport "<제목>" | --list       vbaloop 자체 결함 리포트 생성/열거 (vbaloop\docs\bugreports)
-          vbaloop version                          실행 exe의 버전 + git 리비전 + 빌드 시각
-          vbaloop update  [--check] [--yes] [--force]   최신 릴리스로 설치본 갱신(SHA-256 검증) 후 init --all 여부 확인 (--yes: 묻지 않고 실행)
+        Usage:
+          vbaloop setup   [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]  dev-environment wizard (interactive; --workbook starts from a copy of an existing workbook, --new starts a new project in .\<name>\, --plan shows the plan without changes, --enable-vbom consents to the AccessVBOM change (not included in --yes), --install-only installs the exe only)
+          vbaloop init    [--check] [--all] [--json]  onboarding bootstrap / drift convergence (no Excel needed; --all covers every registered project)
+          vbaloop doctor  [--json] [--kill-orphans] [--fix]  environment check + orphan Excel report (kill/fix only when specified)
+          vbaloop status  [--json]                 session/project status
+          vbaloop diff    [--json] [--module <name>]  read-only comparison of workbook VBProject vs src (ephemeral mode uses a read-only Excel; persistent needs an active session)
+          vbaloop session start|stop [--no-save] [--discard]   start/stop a persistent tool-owned Excel session (optional in the default ephemeral mode; --discard: discard without saving and clear quarantine)
+          vbaloop session attach                   adopt the canonical workbook the user already opened (stop only detaches; Excel is not closed or saved)
+          vbaloop recovery status|clear [--force]  check/clear quarantine (clear only after confirming the quarantined Excel is closed; --force with a warning)
+          vbaloop pull    [--json] [--force]       workbook -> src (blocked if src has unsynced edits)
+          vbaloop push    [--json] [--force] [--prune] [--force-form-import] [--skip-compile]   src -> workbook (in-place injection -> save only if VBE compile passes; --force bypasses the fingerprint cache and re-injects everything)
+          vbaloop test    [--json] [--timeout N]   run/read Test_* procedures
+          vbaloop run     <Module.Proc> [--timeout N]   run a single arbitrary macro
+          vbaloop dist    [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   clean-copy distribution build (§9, VBE compile check before publishing, .xlam also supported)
+          vbaloop rollback --list | --latest | --backup <id> [--json]   restore the workbook from a pre-push backup (only while no persistent session is running)
+          vbaloop lease   acquire|release|status|break [--force]   multi-agent lease
+          vbaloop lint    [--json]                 full check of conventions/encoding/headers (no Excel needed)
+          vbaloop bugreport "<title>" | --list     create/list vbaloop's own defect reports (vbaloop\docs\bugreports)
+          vbaloop version                          running exe's version + git revision + build time
+          vbaloop update  [--check] [--yes] [--force]   update the installed copy to the latest release (SHA-256 verified), then ask whether to run init --all (--yes: run without asking)
 
-        공통: --config <vbaloop.toml 경로>  (기본: cwd에서 상위로 탐색)
-        세션 모드: vbaloop.toml [excel] session = "ephemeral"(기본, 명령마다 숨은 Excel) | "persistent"
-        종료 코드: 성공 0, 환경 오류(세션/Excel/COM/busy/격리 - hint 확인) 3, 그 외 2
+        Common: --config <vbaloop.toml path>  (default: search upward from cwd)
+        Session mode: vbaloop.toml [excel] session = "ephemeral" (default, hidden Excel per command) | "persistent"
+        Exit codes: success 0, environment error (session/Excel/COM/busy/quarantine - see hint) 3, otherwise 2
         """;
 }

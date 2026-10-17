@@ -109,7 +109,7 @@ public class RecoveryMarkerTests : IDisposable
             .Save(cfg.RecoveryMarkerPath);
 
         var e = Assert.Throws<CliError>(() => RecoveryGate.Enforce(cfg, null));
-        Assert.Contains("분리만", e.Hint);
+        Assert.Contains("detach only", e.Hint);
     }
 
     [Fact]

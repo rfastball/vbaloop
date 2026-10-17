@@ -29,7 +29,7 @@ public static class SessionProbe
     public static ProbeResult Run(int pid, string startTimeIso, int timeoutMs = DefaultTimeoutMs)
     {
         string? exe = Environment.ProcessPath;
-        if (exe == null) return ProbeResult.Unresponsive("자기 exe 경로를 확인할 수 없음");
+        if (exe == null) return ProbeResult.Unresponsive("cannot determine own exe path");
 
         var psi = new ProcessStartInfo
         {
@@ -47,27 +47,27 @@ public static class SessionProbe
         try
         {
             using var proc = Process.Start(psi);
-            if (proc == null) return ProbeResult.Unresponsive("프로브 프로세스 시작 실패");
+            if (proc == null) return ProbeResult.Unresponsive("probe process failed to start");
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             _ = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(timeoutMs))
             {
                 // 프로브 자식은 우리 프로세스 — 이것을 죽이는 것은 Excel에 영향 없음
                 try { proc.Kill(entireProcessTree: true); } catch { /* 이미 종료 */ }
-                return ProbeResult.Unresponsive($"프로브 {timeoutMs}ms 시간 초과");
+                return ProbeResult.Unresponsive($"probe timed out after {timeoutMs}ms");
             }
             return Parse(stdoutTask.GetAwaiter().GetResult());
         }
         catch (Exception ex)
         {
-            return ProbeResult.Unresponsive($"프로브 실행 실패: {ex.Message}");
+            return ProbeResult.Unresponsive($"probe run failed: {ex.Message}");
         }
     }
 
     public static ProbeResult Parse(string stdout)
     {
         int brace = stdout.IndexOf('{');
-        if (brace < 0) return ProbeResult.Unresponsive("프로브가 JSON을 출력하지 않음");
+        if (brace < 0) return ProbeResult.Unresponsive("probe emitted no JSON");
         try
         {
             using var doc = JsonDocument.Parse(stdout[brace..]);
@@ -83,7 +83,7 @@ public static class SessionProbe
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return ProbeResult.Unresponsive($"프로브 출력 파싱 실패: {ex.Message}");
+            return ProbeResult.Unresponsive($"probe output parse failed: {ex.Message}");
         }
     }
 
@@ -94,7 +94,7 @@ public static class SessionProbe
         try
         {
             if (opts.Positional.Count < 2 || !int.TryParse(opts.Positional[0], out int pid))
-                r = ProbeResult.Unresponsive("__probe 인자 오류: <pid> <startTime>");
+                r = ProbeResult.Unresponsive("__probe argument error: <pid> <startTime>");
             else
                 r = ProbeInProcess(pid, opts.Positional[1] == "none" ? "" : opts.Positional[1]);
         }
@@ -110,7 +110,7 @@ public static class SessionProbe
     private static ProbeResult ProbeInProcess(int pid, string startTimeIso)
     {
         if (ProcessIdentity.Identify(pid, startTimeIso) != IdentityState.Match)
-            return ProbeResult.Unresponsive("프로세스 신원 불일치 또는 확인 불가");
+            return ProbeResult.Unresponsive("process identity mismatch or unverifiable");
 
         var tops = NativeMethods.TopLevelWindowsOf(pid);
         var excel7 = new List<IntPtr>();
@@ -119,9 +119,9 @@ public static class SessionProbe
 
         // 보이는 창이 하나도 없고 워크북 창(EXCEL7)도 없으면 사람이 작업 중일 수 있는 표면이 없다
         if (excel7.Count == 0 && !tops.Any(t => t.Visible))
-            return new ProbeResult(ProbeKind.Windowless, Array.Empty<string>(), $"최상위 창 {tops.Count}개, 모두 숨김");
+            return new ProbeResult(ProbeKind.Windowless, Array.Empty<string>(), $"{tops.Count} top-level windows, all hidden");
         if (excel7.Count == 0)
-            return ProbeResult.Unresponsive("보이는 창은 있으나 워크북 창(EXCEL7)이 없어 COM 확인 불가");
+            return ProbeResult.Unresponsive("visible windows exist but no workbook window (EXCEL7); cannot check via COM");
 
         string last = "";
         bool sawBusy = false;

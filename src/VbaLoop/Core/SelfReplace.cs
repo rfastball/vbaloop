@@ -25,7 +25,7 @@ public static class SelfReplace
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                throw new CliError($"기존 exe를 옮기지 못함: {e.Message}", $"{target}을 쓰는 프로그램을 종료한 뒤 재시도");
+                throw new CliError($"Could not move the existing exe: {e.Message}", $"Close any program using {target} and retry");
             }
         }
         try
@@ -38,7 +38,7 @@ public static class SelfReplace
             {
                 try { File.Move(moved, target, overwrite: true); } catch { /* 아래 에러가 상황을 말한다 */ }
             }
-            throw new CliError($"새 exe 복사 실패: {e.Message}", "잠시 후 vbaloop update 재시도");
+            throw new CliError($"Failed to copy new exe: {e.Message}", "Retry vbaloop update shortly");
         }
     }
 

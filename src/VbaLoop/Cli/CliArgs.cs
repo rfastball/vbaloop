@@ -83,35 +83,35 @@ public sealed class CliArgs
                 case "--list": r.List = true; break;
                 case "--timeout":
                     if (++i >= args.Length || !int.TryParse(args[i], out var t) || t <= 0)
-                        throw new CliError("--timeout 뒤에 초 단위 양의 정수 필요");
+                        throw new CliError("--timeout requires a positive integer (seconds)");
                     r.TimeoutSec = t;
                     break;
                 case "--config":
-                    if (++i >= args.Length) throw new CliError("--config 뒤에 경로 필요");
+                    if (++i >= args.Length) throw new CliError("--config requires a path");
                     r.Config = args[i];
                     break;
                 case "--runid":
-                    if (++i >= args.Length) throw new CliError("--runid 뒤에 값 필요");
+                    if (++i >= args.Length) throw new CliError("--runid requires a value");
                     r.RunId = args[i];
                     break;
                 case "--session-meta":
-                    if (++i >= args.Length) throw new CliError("--session-meta 뒤에 경로 필요");
+                    if (++i >= args.Length) throw new CliError("--session-meta requires a path");
                     r.SessionMeta = args[i];
                     break;
                 case "--macro":
-                    if (++i >= args.Length) throw new CliError("--macro 뒤에 Module.Proc 필요");
+                    if (++i >= args.Length) throw new CliError("--macro requires Module.Proc");
                     r.Macro = args[i];
                     break;
                 case "--module":
-                    if (++i >= args.Length) throw new CliError("--module 뒤에 모듈 이름 필요");
+                    if (++i >= args.Length) throw new CliError("--module requires a module name");
                     r.Module = args[i];
                     break;
                 case "--out":
-                    if (++i >= args.Length) throw new CliError("--out 뒤에 출력 경로 필요");
+                    if (++i >= args.Length) throw new CliError("--out requires an output path");
                     r.Out = args[i];
                     break;
                 case "--bootstrap":
-                    if (++i >= args.Length) throw new CliError("--bootstrap 뒤에 Module.Proc 필요");
+                    if (++i >= args.Length) throw new CliError("--bootstrap requires Module.Proc");
                     r.Bootstrap = args[i];
                     break;
                 case "--strip-comments":
@@ -127,25 +127,25 @@ public sealed class CliArgs
                 case "--latest": r.Latest = true; break;
                 case "--skip-compile": r.SkipCompile = true; break;
                 case "--backup":
-                    if (++i >= args.Length) throw new CliError("--backup 뒤에 백업 id 필요");
+                    if (++i >= args.Length) throw new CliError("--backup requires a backup id");
                     r.Backup = args[i];
                     break;
                 case "--folder":
-                    if (++i >= args.Length) throw new CliError("--folder 뒤에 경로 필요");
+                    if (++i >= args.Length) throw new CliError("--folder requires a path");
                     r.Folder = args[i];
                     break;
                 case "--workbook":
-                    if (++i >= args.Length) throw new CliError("--workbook 뒤에 .xlsm 경로 필요");
+                    if (++i >= args.Length) throw new CliError("--workbook requires an .xlsm path");
                     r.Workbook = args[i];
                     break;
                 case "--new":
-                    if (++i >= args.Length) throw new CliError("--new 뒤에 프로젝트 이름 필요");
+                    if (++i >= args.Length) throw new CliError("--new requires a project name");
                     r.NewName = args[i];
                     break;
                 default:
                     if (args[i].StartsWith('-'))
-                        throw new CliError($"미지 옵션: {args[i]}",
-                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --workbook <경로> --new <이름> --strip-comments");
+                        throw new CliError($"unknown option: {args[i]}",
+                            "Supported options: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <seconds> --config <path> --module <name> --out <path> --bootstrap <Module.Proc> --folder <path> --workbook <path> --new <name> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }

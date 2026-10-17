@@ -64,7 +64,7 @@ public static class VbaProjectOps
                 if (snapshot.Length > 0) codeModule.AddFromString(snapshot);
             }
             catch { /* 원복 실패 — 상위에서 전체 실패 처리 */ }
-            throw new CliError($"코드 주입 실패(원복 시도함): {ex.Message}");
+            throw new CliError($"code injection failed (rollback attempted): {ex.Message}");
         }
     }
 
@@ -92,8 +92,8 @@ public static class VbaProjectOps
         int actual = MeaningfulCountModule(codeModule);
         if (actual != expected)
             throw new CliError(
-                $"코드 주입 후 논리행수 불일치(기대 {expected}, 실제 {actual}) — VBE 주입 파손 의심",
-                "해당 모듈의 컨티뉴에이션 Declare 등을 점검하거나 수동 Export/Import로 관리");
+                $"logical line count mismatch after code injection (expected {expected}, actual {actual}) — suspected VBE injection corruption",
+                "check that module for line-continued Declare statements etc., or manage it via manual Export/Import");
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ public static class VbaProjectOps
         ComRetry.Invoke(() => { comp.Name = name; });
         string actual = Convert.ToString(comp.Name) ?? "";
         if (!actual.Equals(name, StringComparison.OrdinalIgnoreCase))
-            throw new CliError($"{name}: 신규 모듈 이름 지정 실패 (실제: {actual})");
+            throw new CliError($"{name}: failed to name the new module (actual: {actual})");
         ReplaceCode(comp.CodeModule, bodyLines);
     }
 
@@ -162,6 +162,6 @@ public static class VbaProjectOps
     {
         ComRetry.Invoke(() => { vbProject.VBComponents.Remove(comp); });
         if (ComponentNames(vbProject).Contains(name))
-            throw new CliError($"{name}: Remove 후에도 컴포넌트가 남아 있음(비동기 지연)");
+            throw new CliError($"{name}: component still present after Remove (async delay)");
     }
 }

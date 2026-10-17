@@ -19,7 +19,7 @@ public static class RecoveryCommand
         {
             "status" => Status(opts),
             "clear" => Clear(opts),
-            _ => throw new CliError($"미지 recovery 하위 명령: {sub}", "recovery status 또는 recovery clear [--force]"),
+            _ => throw new CliError($"Unknown recovery subcommand: {sub}", "recovery status or recovery clear [--force]"),
         };
     }
 
@@ -30,15 +30,15 @@ public static class RecoveryCommand
         var m = RecoveryMarker.Load(cfg.RecoveryMarkerPath);
         if (m == null)
         {
-            o.HumanLines.Add("격리 없음");
+            o.HumanLines.Add("no quarantine");
             o.Payload = new { quarantined = false };
             return o;
         }
         var identity = m.Corrupt ? IdentityState.Unknown : ProcessIdentity.Identify(m.Pid, m.ExcelStartTime);
         o.HumanLines.Add(m.Describe());
         o.HumanLines.Add(identity == IdentityState.Gone
-            ? "기록된 Excel 프로세스는 이미 종료됨 — recovery clear 또는 다음 세션 명령이 자동 해제"
-            : "기록된 Excel 프로세스가 살아있음");
+            ? "recorded Excel process has already exited — recovery clear or the next session command clears it automatically"
+            : "recorded Excel process is alive");
         o.Hint = identity == IdentityState.Gone ? "vbaloop recovery clear" : RecoveryGate.HintFor(m);
         o.Payload = new { quarantined = true, processState = identity.ToString().ToLowerInvariant(), marker = Describe(m) };
         return o;
@@ -58,7 +58,7 @@ public static class RecoveryCommand
         var m = RecoveryMarker.Load(cfg.RecoveryMarkerPath);
         if (m == null)
         {
-            o.HumanLines.Add("격리 없음 (no-op)");
+            o.HumanLines.Add("no quarantine (no-op)");
             o.Payload = new { action = "none" };
             return o;
         }
@@ -69,7 +69,7 @@ public static class RecoveryCommand
         {
             log.Write("warn", "recovery_clear_refused", new { pid = m.Pid, why = d.Why });
             o.Payload = new { action = "refused", reason = d.Why, marker = Describe(m) };
-            o.Fail($"격리 해제 거부: {d.Why}", RecoveryGate.HintFor(m), environment: true);
+            o.Fail($"Quarantine clear refused: {d.Why}", RecoveryGate.HintFor(m), environment: true);
             return o;
         }
 
@@ -84,8 +84,8 @@ public static class RecoveryCommand
         log.Write(forced ? "warn" : "info", forced ? "recovery_force_cleared" : "recovery_cleared",
             new { pid = m.Pid, reason = m.Reason, why = d.Why });
         o.HumanLines.Add(forced
-            ? $"경고: {d.Why} — Excel PID {m.Pid}는 종료되지 않았고 도구가 더 이상 관리하지 않음(필요하면 직접 저장/종료)"
-            : $"격리 해제: {d.Why}");
+            ? $"Warning: {d.Why} — Excel PID {m.Pid} was not terminated and is no longer managed by the tool — tell the user to save/close it manually if needed (do not close it yourself)"
+            : $"Quarantine cleared: {d.Why}");
         o.Payload = new { action = forced ? "force_cleared" : "cleared", pid = m.Pid, reason = d.Why };
         return o;
     }

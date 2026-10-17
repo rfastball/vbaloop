@@ -80,7 +80,7 @@ public static class PushCommand
         {
             if (!opts.Force && !opts.Prune)
             {
-                o.HumanLines.Add("push: 변경 없음 (소스 지문 일치, no-op)");
+                o.HumanLines.Add("push: no changes (source fingerprint matches, no-op)");
                 o.Payload = new { cached = true, fingerprint, modules = Array.Empty<object>() };
                 return o;
             }
@@ -120,8 +120,8 @@ public static class PushCommand
         {
             log.Write("error", "push_readonly_refused", new { workbook = meta.WorkbookFullName });
             throw new CliError(
-                "워크북이 read-only 상태 — 저장 불가이므로 주입 전에 push 중단",
-                "session stop 후 vbaloop doctor로 잠금 보유 프로세스 확인, 정리 후 재시도",
+                "workbook is read-only — cannot save, so push aborted before injection",
+                "after session stop, run vbaloop doctor to find the process holding the lock (the user decides whether to clean it up), then retry",
                 environment: true);
         }
 
@@ -141,15 +141,15 @@ public static class PushCommand
             .ToList();
         if (plan.Prunable.Count > 0 && !opts.Prune)
             throw new CliError(
-                $"src에 없는 워크북 모듈 존재: {string.Join(", ", plan.Prunable)} (rename은 삭제+신규로 취급됨)",
-                "--prune으로 명시 삭제");
+                $"workbook modules not in src: {string.Join(", ", plan.Prunable)} (rename is treated as delete + add)",
+                "delete explicitly with --prune");
 
         // 0.5. push 전 백업 — 첫 워크북 변형 직전. 캐시 히트(no-op)는 위에서 이미 반환했다.
         // 실패하면 워크북을 건드리기 전에 중단(fail closed): 백업 없는 주입은 rollback 근거가 없다.
         string? backupId = BackupBeforeMutation(cfg, app, wb, fingerprint, sync, log);
         if (backupId != null)
-            o.HumanLines.Add($"백업: _dbg/backups/{backupId} (되돌리기: "
-                             + (ephemeral ? "" : "session stop 후 ") + "vbaloop rollback --latest)");
+            o.HumanLines.Add($"backup: _dbg/backups/{backupId} (undo: "
+                             + (ephemeral ? "" : "after session stop, ") + "vbaloop rollback --latest)");
 
         var results = new List<ModuleResult>();
 
@@ -161,7 +161,7 @@ public static class PushCommand
             {
                 Name = docName,
                 Action = "skipped",
-                Reason = "워크북 전용 문서/시트 모듈 — push 관리 대상 아님(생성/삭제 불가). src로 회수하려면 vbaloop pull",
+                Reason = "workbook-only document/sheet module — not managed by push (cannot create/delete). To pull back into src, use vbaloop pull",
             });
         }
 
@@ -176,7 +176,7 @@ public static class PushCommand
         {
             if (abortReason != null)
             {
-                results.Add(new ModuleResult { Name = sm.Name, Action = "skipped", Reason = "선행 실패로 중단" });
+                results.Add(new ModuleResult { Name = sm.Name, Action = "skipped", Reason = "aborted due to earlier failure" });
                 continue;
             }
             try
@@ -230,12 +230,12 @@ public static class PushCommand
         {
             var parts = new List<string>();
             if (diff.DuplicateSignatures.Count > 0)
-                parts.Add($"중복 모듈 시그니처: {string.Join(", ", diff.DuplicateSignatures)}");
+                parts.Add($"duplicate module signatures: {string.Join(", ", diff.DuplicateSignatures)}");
             if (diff.Unexpected.Count > 0)
-                parts.Add($"기대하지 않은 이름: {string.Join(", ", diff.Unexpected)}");
+                parts.Add($"unexpected names: {string.Join(", ", diff.Unexpected)}");
             if (diff.Missing.Count > 0)
-                parts.Add($"사라진 이름: {string.Join(", ", diff.Missing)}");
-            return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"무결성 체크 실패: {string.Join(" / ", parts)}",
+                parts.Add($"missing names: {string.Join(", ", diff.Missing)}");
+            return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"integrity check failed: {string.Join(" / ", parts)}",
                 journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false, ephemeral: ephemeral);
         }
 
@@ -247,7 +247,7 @@ public static class PushCommand
             int lines = Convert.ToInt32(byNameAfter[r.Name].Comp.CodeModule.CountOfLines);
             if (lines == 0)
             {
-                return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"무결성 체크 실패: {r.Name} 주입 후 본문이 비어 있음",
+                return FailWithRecovery(o, PushRecovery.Phase.Integrity, $"integrity check failed: {r.Name} body is empty after injection",
                     journal, proj, cfg, meta, log, results, fingerprint, backupId, fatalCom: false, ephemeral: ephemeral);
             }
         }
@@ -263,16 +263,16 @@ public static class PushCommand
             o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, compile: compilePayload);
             bool compileError = compile.Kind == DistCompileVerdict.Kind.CompileError;
             o.Fail(
-                (compileError ? $"컴파일 오류 — 저장하지 않음: {compile.Detail}" : $"컴파일 검증 불가 — 저장하지 않음: {compile.Detail}")
-                + " (일회용 Excel을 저장 없이 폐기, 디스크 정본은 push 이전 상태)",
+                (compileError ? $"compile error — not saved: {compile.Detail}" : $"compile verification unavailable — not saved: {compile.Detail}")
+                + " (ephemeral Excel discarded without saving; canonical workbook on disk is in its pre-push state)",
                 compileError
-                    ? "src에서 해당 오류를 고친 뒤 push 재시도. 이번 변경과 무관한 기존 오류면 사용자 확인 후 push --skip-compile"
-                    : "AccessVBOM과 VBE 상태 확인. 검증 없이 저장하려면 push --skip-compile");
+                    ? "fix the error in src, then retry push. If it is a pre-existing error unrelated to this change, run push --skip-compile after the user confirms"
+                    : "check AccessVBOM and VBE state with vbaloop doctor, then retry. Save without verification (push --skip-compile) only after the user confirms");
             log.Write("error", "push_compile_gate_failed", new { result = compile.Label, detail = compile.Detail });
             return o;
         }
         if (compile?.Kind == DistCompileVerdict.Kind.Unverified)
-            o.HumanLines.Add($"주의: 컴파일 검증 불완전 — {compile.Detail}");
+            o.HumanLines.Add($"warning: compile verification incomplete — {compile.Detail}");
 
         // 7. 종결: 무결성 통과 직후 save — 저장 없이 성공을 보고하지 않는다(poison-kill 유실 방지)
         app.DisplayAlerts = false;
@@ -289,11 +289,11 @@ public static class PushCommand
             // 세션 워크북의 FullName이 오탈출 사본을 가리켜 세션 자체가 못 쓰는 상태 —
             // poison해서 다음 명령의 auto-ensure가 kill/재기동하게 한다(잠금 잔존 시 fail-fast).
             meta.MarkPoisoned(
-                $"push: Save가 정본 대신 {actualFull}로 SaveAs됨(read-only 잠금 의심)", null);
+                $"push: Save did SaveAs to {actualFull} instead of the canonical workbook (suspected read-only lock)", null);
             o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, compile: compilePayload);
             o.Fail(
-                $"저장 드리프트: Save가 정본({cfg.WorkbookPath})이 아니라 {actualFull}에 기록됨 — 캐시 미갱신, 오탈출 사본은 수동 삭제 필요",
-                "vbaloop doctor로 정본 파일 잠금 확인 후 재시도",
+                $"save drift: Save wrote to {actualFull} instead of the canonical workbook ({cfg.WorkbookPath}) — cache not updated; the stray copy must be deleted manually (confirm with the user)",
+                "check the canonical workbook lock with vbaloop doctor, then retry",
                 environment: true);
             return o;
         }
@@ -310,8 +310,8 @@ public static class PushCommand
         });
 
         var summary = results.GroupBy(r => r.Action).Select(g => $"{g.Key} {g.Count()}");
-        o.HumanLines.Add($"push 완료(저장됨): {string.Join(", ", summary)}"
-                         + (compile != null ? $", 컴파일 {compile.Label}" : ""));
+        o.HumanLines.Add($"push done (saved): {string.Join(", ", summary)}"
+                         + (compile != null ? $", compile {compile.Label}" : ""));
         o.Payload = BuildPayload(results, fingerprint, saved: true, backupId, compile: compilePayload);
         return o;
     }
@@ -339,7 +339,7 @@ public static class PushCommand
     {
         string? skip = opts.SkipCompile ? "--skip-compile"
             : !cfg.PushCompile ? "[push] compile = false"
-            : !ephemeral ? "유지되는 세션 Excel(persistent 모드, session start/attach)에서는 컴파일 게이트를 돌리지 않음 — test가 컴파일 오류를 보고"
+            : !ephemeral ? "compile gate is not run in a persistent session Excel (persistent mode, session start/attach) — test reports compile errors"
             : null;
         if (skip != null)
         {
@@ -373,8 +373,8 @@ public static class PushCommand
                 failures = Array.Empty<string>(),
                 poisonReason = (string?)null,
             });
-            o.Fail($"push 중단(저장 안 함): {reason} — 일회용 Excel을 저장 없이 폐기, 디스크 정본은 push 이전 상태",
-                "원인 해결 후 재시도", environment: fatalCom);
+            o.Fail($"push aborted (not saved): {reason} — ephemeral Excel discarded without saving; canonical workbook on disk is in its pre-push state",
+                "fix the cause, then retry", environment: fatalCom);
             return o;
         }
 
@@ -388,7 +388,7 @@ public static class PushCommand
                 try
                 {
                     if (RestoreOne(t, journal, proj, log)) restored.Add(t.Module);
-                    else failures.Add($"{t.Module}: 원복 후 본문이 스냅샷과 다름");
+                    else failures.Add($"{t.Module}: body differs from snapshot after rollback");
                 }
                 catch (Exception ex)
                 {
@@ -400,10 +400,10 @@ public static class PushCommand
 
         var state = PushRecovery.Resolve(plan, journal.Touches.Count, failures.Count, fatalCom);
         string? poisonReason = plan.PoisonReason
-            ?? (fatalCom ? "치명적 COM 오류(세션 연결 끊김)"
-                : failures.Count > 0 ? "원복 실패: " + string.Join("; ", failures) : null);
+            ?? (fatalCom ? "fatal COM error (session connection lost)"
+                : failures.Count > 0 ? "rollback failed: " + string.Join("; ", failures) : null);
         if (state == PushRecovery.WorkbookState.Poisoned && !meta.Poisoned)
-            meta.MarkPoisoned($"push 부분 실패 — {poisonReason}", null);
+            meta.MarkPoisoned($"push partial failure — {poisonReason}", null);
         // 실패 모듈은 failed(사유 유지) 그대로 두고, 성공 주입됐다가 되돌린 모듈만 restored로 표기
         foreach (var r in results.Where(r => r.Action != "failed" && restored.Contains(r.Name, StringComparer.OrdinalIgnoreCase)))
             r.Action = "restored";
@@ -422,7 +422,7 @@ public static class PushCommand
             failures,
             poisonReason,
         });
-        o.Fail($"push 중단(저장 안 함): {reason} — {summary}", hint, environment: fatalCom);
+        o.Fail($"push aborted (not saved): {reason} — {summary}", hint, environment: fatalCom);
         return o;
     }
 
@@ -483,8 +483,8 @@ public static class PushCommand
             log.Write("error", "push_backup_failed", new { id = slot.Id, error = ex.Message });
             if (IsFatalCom(ex)) throw;
             throw new CliError(
-                $"push 전 백업 실패 — 워크북을 건드리기 전에 중단: {ex.Message}",
-                "_dbg 쓰기 권한·디스크 여유·경로 길이(Excel 218자 한계) 확인. 백업 없이 진행하려면 vbaloop.toml에 [backup] keep = 0");
+                $"pre-push backup failed — aborted before touching the workbook: {ex.Message}",
+                "check _dbg write permission, free disk space, and path length (Excel 218-char limit). To proceed without backups, the user can set [backup] keep = 0 in vbaloop.toml");
         }
         log.Write("info", "push_backup_done", new { id = slot.Id, path = slot.CopyPath });
 
@@ -503,14 +503,14 @@ public static class PushCommand
     private static List<SrcModule> LoadSrc(ProjectConfig cfg, int codePage, ToolLog log)
     {
         if (!Directory.Exists(cfg.SrcRoot))
-            throw new CliError($"src 루트 없음: {cfg.SrcRoot}", "vbaloop pull로 초기 생성");
+            throw new CliError($"src root not found: {cfg.SrcRoot}", "create it initially with vbaloop pull");
 
         var files = Directory.EnumerateFiles(cfg.SrcRoot)
             .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".bas" or ".cls" or ".frm")
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (files.Count == 0)
-            throw new CliError($"src에 소스 파일이 없음: {cfg.SrcRoot}", "vbaloop pull로 초기 생성");
+            throw new CliError($"no source files in src: {cfg.SrcRoot}", "create them initially with vbaloop pull");
 
         // 인코딩 가드: 인코딩 불가 문자를 파일/라인 위치로 리포트하고 save 전에 실패
         var allViolations = new List<string>();
@@ -521,9 +521,9 @@ public static class PushCommand
             var lines = CanonicalText.SplitLines(CanonicalText.ReadFileStripBom(file));
             var violations = Cp949Guard.Check(lines, codePage);
             foreach (var v in violations.Take(20))
-                allViolations.Add($"{Path.GetFileName(file)}:{v.Line}:{v.Column}: '{v.Char}' ({v.CodePoint}) — CP{codePage} 표현 불가");
+                allViolations.Add($"{Path.GetFileName(file)}:{v.Line}:{v.Column}: '{v.Char}' ({v.CodePoint}) — not representable in CP{codePage}");
             if (violations.Count > 20)
-                allViolations.Add($"{Path.GetFileName(file)}: 외 {violations.Count - 20}건");
+                allViolations.Add($"{Path.GetFileName(file)}: and {violations.Count - 20} more");
             if (violations.Count > 0) continue;
 
             var split = VbaHeader.Split(lines, file, strict: true); // Attribute-after-code는 여기서 CliError
@@ -553,10 +553,10 @@ public static class PushCommand
         {
             log.Write("error", "encoding_guard_failed", new { violations = allViolations });
             throw new CliError(
-                $"인코딩 가드 실패 — CP{codePage} 밖 문자는 push 시 확정 손실: " +
+                $"encoding guard failed — characters outside CP{codePage} are definitively lost on push: " +
                 string.Join(" | ", allViolations.Take(5)) +
-                (allViolations.Count > 5 ? $" 외 {allViolations.Count - 5}건" : ""),
-                "해당 문자를 제거/치환 (em dash는 ChrW(&H2014) 등 코드 생성으로)");
+                (allViolations.Count > 5 ? $" and {allViolations.Count - 5} more" : ""),
+                "remove/replace those characters (generate em dash in code, e.g. ChrW(&H2014))");
         }
 
         return modules;
@@ -572,7 +572,7 @@ public static class PushCommand
         if (byName.TryGetValue(sm.Name, out var ci))
         {
             if (ci.Type == VbaProjectOps.TypeMsForm)
-                throw new CliError($"{sm.Name}: 워크북 컴포넌트는 폼인데 src는 {sm.Ext} — 타입 불일치");
+                throw new CliError($"{sm.Name}: workbook component is a form but src is {sm.Ext} — type mismatch");
             journal.CodeReplacing(sm.Name, VbaProjectOps.ReadModuleBody(ci.Comp.CodeModule));
             ReplaceModuleCode(ci.Comp.CodeModule, sm.Body);
             log.Write("info", "module_replaced", new { module = sm.Name });
@@ -587,7 +587,7 @@ public static class PushCommand
             {
                 Name = sm.Name,
                 Action = "skipped",
-                Reason = "문서모듈은 생성 불가 — 워크북에 대응 컴포넌트 없음",
+                Reason = "document module cannot be created — no matching component in the workbook",
             };
         }
 
@@ -597,7 +597,7 @@ public static class PushCommand
         ComRetry.Invoke(() => { newComp.Name = sm.Name; });
         string actualName = Convert.ToString(newComp.Name) ?? "";
         if (!actualName.Equals(sm.Name, StringComparison.OrdinalIgnoreCase))
-            throw new CliError($"{sm.Name}: 신규 모듈 이름 지정 실패 (실제: {actualName})");
+            throw new CliError($"{sm.Name}: failed to name the new module (actual: {actualName})");
         expectedAdded.Add(sm.Name);
         ReplaceModuleCode(newComp.CodeModule, sm.Body);
         log.Write("info", "module_added", new { module = sm.Name });
@@ -627,7 +627,7 @@ public static class PushCommand
         if (byName.TryGetValue(sm.Name, out var ci))
         {
             if (ci.Type != VbaProjectOps.TypeMsForm)
-                throw new CliError($"{sm.Name}: src는 폼인데 워크북 컴포넌트 타입이 {ci.Type} — 타입 불일치");
+                throw new CliError($"{sm.Name}: src is a form but workbook component type is {ci.Type} — type mismatch");
 
             // in-place(코드비하인드만) 조건 = 레이아웃 텍스트 동등 AND src frx가 마지막 동기화
             // 상태 그대로. frx는 비결정적이라 fresh Export 바이트 비교가 불가하므로(실측)
@@ -650,7 +650,7 @@ public static class PushCommand
                     {
                         Name = sm.Name,
                         Action = "replaced",
-                        Reason = "코드비하인드만 in-place",
+                        Reason = "code-behind only, in-place",
                         BodyLineCount = sm.Body.Count,
                     };
                 }
@@ -658,7 +658,7 @@ public static class PushCommand
 
             // 레이아웃 변경 / frx 교체 / --force-form-import → 검증형 Remove 후 Import
             if (sm.FrxPath == null)
-                throw new CliError($"{sm.Name}: 레이아웃/frx 반영에 필요한 .frx 파일이 src에 없음");
+                throw new CliError($"{sm.Name}: the .frx file needed to apply layout/frx changes is missing from src");
             journal.FormReimporting(sm.Name); // 원본 폼 바이너리가 없어 원복 불가 → 이후 실패는 poison
             VerifiedRemove(proj, ci, log);
             expectedRemoved.Add(sm.Name);
@@ -669,14 +669,14 @@ public static class PushCommand
             {
                 Name = sm.Name,
                 Action = "replaced",
-                Reason = forceImport ? "강제 Import(--force-form-import)" : "레이아웃/frx 변경 — Export/Import 왕복",
+                Reason = forceImport ? "forced Import (--force-form-import)" : "layout/frx change — Export/Import round trip",
                 BodyLineCount = sm.Body.Count,
             };
         }
 
         // 신규 폼
         if (sm.FrxPath == null)
-            throw new CliError($"{sm.Name}: 신규 폼 Import에 필요한 .frx 파일이 src에 없음");
+            throw new CliError($"{sm.Name}: the .frx file needed to Import the new form is missing from src");
         ImportForm(sm, proj, codePage, log, journal);
         expectedAdded.Add(sm.Name);
         UpdateFormCache(sync, sm, srcFrxHash);
@@ -742,7 +742,7 @@ public static class PushCommand
             // Import 후 중복 이름 검사 (폼 예외 c) — <name>1 패턴이면 save 전에 실패
             if (!actualName.Equals(sm.Name, StringComparison.OrdinalIgnoreCase))
                 throw new CliError(
-                    $"{sm.Name}: Import 결과 이름이 {actualName} — 중복 사본 생성 의심(중복 모듈 시그니처), 저장 중단");
+                    $"{sm.Name}: Import result name is {actualName} — suspected duplicate copy (duplicate module signature), save aborted");
             log.Write("info", "form_imported", new { module = sm.Name });
         }
         finally
@@ -759,8 +759,8 @@ public static class PushCommand
         HashSet<string> namesNow = VbaProjectOps.ComponentNames(proj);
         if (namesNow.Contains(ci.Name))
             throw new CliError(
-                $"{ci.Name}: Remove 후에도 컴포넌트가 남아 있음(비동기 지연) — 저장 전 중단",
-                "session start로 세션 재시작 후 재시도");
+                $"{ci.Name}: component still present after Remove (async delay) — aborted before save",
+                "restart the session with session start, then retry");
         log.Write("info", "module_removed", new { module = ci.Name });
     }
 }

@@ -78,7 +78,7 @@ public static class LeaseService
 
             throw BusyError(owner!, now);
         }
-        throw new CliError("lease 획득 경쟁이 해소되지 않음", "vbaloop lease status로 상태 확인 후 재시도");
+        throw new CliError("lease acquisition race not resolved", "Check state with vbaloop lease status, then retry");
     }
 
     /// <summary>session stop 특례의 소유 판정용: 내 것이면 해제. 없으면 no-op.</summary>
@@ -96,8 +96,8 @@ public static class LeaseService
         double idle = LeaseFile.IdleSeconds(owner, utcNow);
         string idleText = double.IsNaN(idle) ? "?" : $"{(int)idle}s";
         return new CliError(
-            $"다른 에이전트가 lease 보유 중: {owner.OwnerThread} (source={owner.OwnerSource}, 유휴 {idleText}, 마지막 명령 {owner.LastCommand})",
-            "소유자가 진행 중이면 대기, 확실히 방치된 lease면 vbaloop lease break --force");
+            $"Another agent holds the lease: {owner.OwnerThread} (source={owner.OwnerSource}, idle {idleText}, last command {owner.LastCommand})",
+            "Wait if the owner is still working; if the lease is clearly abandoned, run vbaloop lease break --force");
     }
 
     private static LeaseOwner NewOwner(ProjectConfig cfg, AgentIdentity.Identity id, string command, DateTime now)

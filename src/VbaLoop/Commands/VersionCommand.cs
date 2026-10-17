@@ -15,8 +15,8 @@ public static class VersionCommand
         var o = new Outcome { Command = "version" };
         var exePath = Environment.ProcessPath;
         o.HumanLines.Add($"vbaloop {GetVersion()} ({GetRevision()})");
-        o.HumanLines.Add($"exe: {exePath ?? "미상"}");
-        o.HumanLines.Add($"built: {GetBuildTime() ?? "미상"}");
+        o.HumanLines.Add($"exe: {exePath ?? "unknown"}");
+        o.HumanLines.Add($"built: {GetBuildTime() ?? "unknown"}");
         o.Payload = new
         {
             version = GetVersion(),
@@ -43,5 +43,5 @@ public static class VersionCommand
 
     /// <summary>bugreport 템플릿의 "실행 exe 빌드" 라인용 요약.</summary>
     public static string GetBuildInfo()
-        => $"{GetVersion()} ({GetRevision()}), built {GetBuildTime() ?? "미상"}";
+        => $"{GetVersion()} ({GetRevision()}), built {GetBuildTime() ?? "unknown"}";
 }

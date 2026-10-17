@@ -23,8 +23,8 @@ public static class ProjectRoot
     {
         string? outer = Enclosing(folder);
         if (outer != null)
-            throw new CliError($"다른 vbaloop 프로젝트 안쪽에는 새 프로젝트를 만들 수 없음: {Path.GetFullPath(folder)} (바깥 프로젝트: {outer})",
-                "바깥 프로젝트 폴더 밖에서 다시 실행하거나 --folder로 다른 위치를 지정");
+            throw new CliError($"cannot create a new project inside another vbaloop project: {Path.GetFullPath(folder)} (outer project: {outer})",
+                "rerun from outside the outer project folder, or specify another location with --folder");
     }
 
     /// <summary>
@@ -40,11 +40,11 @@ public static class ProjectRoot
         var cfg = ProjectConfig.Load(toml, full);
         string rel = Path.GetRelativePath(full, cfg.WorkbookPath);
         if (rel.StartsWith("..") || Path.IsPathRooted(rel))
-            throw new CliError($"vbaloop.toml의 워크북이 프로젝트 폴더 밖을 가리킴: {cfg.WorkbookPath}",
-                "[excel].workbook을 프로젝트 폴더 기준 상대 경로로 고친 뒤 다시 실행");
+            throw new CliError($"the workbook in vbaloop.toml points outside the project folder: {cfg.WorkbookPath}",
+                "change [excel].workbook to a path relative to the project folder, then rerun");
         if (!File.Exists(cfg.WorkbookPath))
-            throw new CliError($"vbaloop.toml이 가리키는 워크북이 없음: {cfg.WorkbookPath}",
-                "[excel].workbook 경로를 확인하거나 워크북을 그 위치에 둔 뒤 다시 실행");
+            throw new CliError($"the workbook referenced by vbaloop.toml does not exist: {cfg.WorkbookPath}",
+                "check the [excel].workbook path, or place the workbook there, then rerun");
         return rel;
     }
 }

@@ -94,9 +94,9 @@ public sealed class ProjectConfig
         var tomlPath = FindTomlPath(configOverride, cwd)
             ?? throw new CliError(
                 configOverride != null
-                    ? $"--config 경로에 파일이 없음: {configOverride}"
-                    : $"vbaloop.toml을 찾지 못함 (탐색 시작: {cwd})",
-                "프로젝트 루트에서 vbaloop init 실행 (온보딩 부트스트랩)");
+                    ? $"no file at the --config path: {configOverride}"
+                    : $"vbaloop.toml not found (search started at: {cwd})",
+                "run vbaloop init at the project root (onboarding bootstrap)");
 
         var root = Path.GetDirectoryName(tomlPath)!;
         var text = File.ReadAllText(tomlPath);
@@ -107,14 +107,14 @@ public sealed class ProjectConfig
             foreach (var section in doc.Keys)
             {
                 if (!KnownSections.Contains(section))
-                    throw new CliError($"{tomlPath}: 미지 섹션 [{section}]",
-                        "지원 섹션: [project], [excel], [src], [dist], [backup], [push], [vbaloop]");
+                    throw new CliError($"{tomlPath}: unknown section [{section}]",
+                        "supported sections: [project], [excel], [src], [dist], [backup], [push], [vbaloop]");
                 if (string.Equals(section, ManagedStamp.Section, StringComparison.OrdinalIgnoreCase))
                     continue;
                 foreach (var key in doc[section].Keys)
                     if (!KnownKeys[section].Contains(key))
-                        throw new CliError($"{tomlPath}: 미지 키 [{section}].{key}",
-                            $"지원 키: {string.Join(", ", KnownKeys[section])}");
+                        throw new CliError($"{tomlPath}: unknown key [{section}].{key}",
+                            $"supported keys: {string.Join(", ", KnownKeys[section])}");
             }
         }
         catch (CliError e) when (ExeOlderThan(text) is string stamp)
@@ -126,8 +126,8 @@ public sealed class ProjectConfig
 
         string? workbookRel = GetString(doc, "excel", "workbook");
         if (string.IsNullOrWhiteSpace(workbookRel))
-            throw new CliError($"{tomlPath}: [excel].workbook이 없음",
-                "workbook = \"파일명.xlsm\" (프로젝트 루트 기준 상대경로)");
+            throw new CliError($"{tomlPath}: [excel].workbook is missing",
+                "workbook = \"filename.xlsm\" (path relative to the project root)");
 
         var workbookPath = Path.GetFullPath(Path.Combine(root, workbookRel));
         var srcRel = GetString(doc, "src", "root") ?? "src";
@@ -173,9 +173,9 @@ public sealed class ProjectConfig
         if (!doc.TryGetValue("backup", out var s) || !s.TryGetValue("keep", out var v))
             return DefaultBackupKeep;
         if (v is not int keep)
-            throw new CliError($"{tomlPath}: [backup].keep은 정수여야 함", "keep = 10 (0이면 push 전 백업 비활성)");
+            throw new CliError($"{tomlPath}: [backup].keep must be an integer", "keep = 10 (0 disables the pre-push backup)");
         if (keep < 0)
-            throw new CliError($"{tomlPath}: [backup].keep은 0 이상이어야 함 (현재 {keep})", "keep = 10 (0이면 push 전 백업 비활성)");
+            throw new CliError($"{tomlPath}: [backup].keep must be >= 0 (currently {keep})", "keep = 10 (0 disables the pre-push backup)");
         return keep;
     }
 
@@ -188,8 +188,8 @@ public sealed class ProjectConfig
         {
             "ephemeral" => SessionMode.Ephemeral,
             "persistent" => SessionMode.Persistent,
-            _ => throw new CliError($"{tomlPath}: [excel].session은 \"ephemeral\" 또는 \"persistent\"",
-                "session = \"ephemeral\" (명령마다 숨은 Excel) | \"persistent\" (세션 Excel 유지)"),
+            _ => throw new CliError($"{tomlPath}: [excel].session must be \"ephemeral\" or \"persistent\"",
+                "session = \"ephemeral\" (hidden Excel per command) | \"persistent\" (keep a session Excel)"),
         };
     }
 
@@ -197,7 +197,7 @@ public sealed class ProjectConfig
         string tomlPath)
     {
         if (!doc.TryGetValue(section, out var s) || !s.TryGetValue(key, out var v)) return null;
-        return v as bool? ?? throw new CliError($"{tomlPath}: [{section}].{key}는 true/false여야 함");
+        return v as bool? ?? throw new CliError($"{tomlPath}: [{section}].{key} must be true/false");
     }
 
     private static string? GetString(Dictionary<string, Dictionary<string, object>> doc, string section, string key)

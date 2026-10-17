@@ -10,7 +10,9 @@ public static class ManagedBlock
     public const string StartMarker = "<!-- vbaloop:managed:start -->";
     public const string EndMarker = "<!-- vbaloop:managed:end -->";
     /// <summary>블록 자신의 헤딩 — 마커가 지워진 블록을 알아보고, end 마커 유실 복구 시 블록 경계로 오인하지 않는다.</summary>
-    private const string OwnHeading = "## 개발 루프 (vbaloop)";
+    private const string OwnHeading = "## Development loop (vbaloop)";
+    /// <summary>한국어 시절의 헤딩 — 이미 배포된 블록(마커 유실 포함)을 계속 알아본다.</summary>
+    private const string LegacyOwnHeading = "## 개발 루프 (vbaloop)";
 
     /// <summary>
     /// existingText가 null이면 파일 부재로 간주해 블록만으로 새 문서(CRLF)를 만든다.
@@ -43,6 +45,7 @@ public static class ManagedBlock
         else
         {
             int heading = FindTrimmed(lines, 0, OwnHeading);
+            if (heading < 0) heading = FindTrimmed(lines, 0, LegacyOwnHeading);
             if (heading >= 0)
             {
                 int next = FindNextH2ExceptOwn(lines, heading + 1); // exclusive 경계
@@ -92,11 +95,17 @@ public static class ManagedBlock
         return -1;
     }
 
+    private static bool IsOwnHeading(string line)
+    {
+        var t = line.Trim();
+        return t == OwnHeading || t == LegacyOwnHeading;
+    }
+
     /// <summary>startIndex 이후 첫 "## " 헤딩 인덱스(블록 자신의 헤딩은 제외). 없으면 lines.Count.</summary>
     private static int FindNextH2ExceptOwn(List<string> lines, int startIndex)
     {
         for (int i = startIndex; i < lines.Count; i++)
-            if (lines[i].StartsWith("## ") && lines[i].Trim() != OwnHeading) return i;
+            if (lines[i].StartsWith("## ") && !IsOwnHeading(lines[i])) return i;
         return lines.Count;
     }
 }

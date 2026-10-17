@@ -44,7 +44,7 @@ public static class ModuleDiff
             if (m.Kind == null)
             {
                 entries.Add(new Entry(m.Name, "unknown", null, "skipped",
-                    Note: $"미지원 컴포넌트 타입 {m.RawType}"));
+                    Note: $"component type not supported: {m.RawType}"));
                 continue;
             }
             // 벤더링 관리 모듈(LogShim)은 정본이 init이지 워크북↔src 비교가 아니다. COM 왕복이
@@ -53,7 +53,7 @@ public static class ModuleDiff
             if (VendoredModules.IsVendored(m.Name))
             {
                 entries.Add(new Entry(m.Name, KindName(m.Kind.Value), null, "managed",
-                    Note: "벤더링 관리 모듈 — 정본은 init(vbaloop init --check로 검증)"));
+                    Note: "vendored managed module — canonical copy is owned by init (verify with vbaloop init --check)"));
                 continue;
             }
             string ext = m.Kind switch
@@ -170,7 +170,7 @@ public static class ModuleDiff
             WorkbookLines: expected.Count, SrcLines: actual.Count,
             FormatOnly: formatOnly, LayoutCompared: layoutCompared),
             casingOnly
-                ? "식별자 케이싱만 상이 — VBE 전역 재케이싱, pull이 src 철자 보존"
+                ? "identifier casing differs only — VBE global re-casing; pull preserves src spelling"
                 : null);
     }
 

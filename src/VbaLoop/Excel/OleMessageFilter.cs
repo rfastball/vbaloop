@@ -30,7 +30,7 @@ public sealed class OleMessageFilter : IOleMessageFilter
         int hr = NativeMethods.CoRegisterMessageFilter(filter, out filter._old);
         if (hr != 0)
             throw new InvalidOperationException(
-                $"CoRegisterMessageFilter 실패 (hr=0x{hr:X8}) — STA 스레드가 아닐 수 있음");
+                $"CoRegisterMessageFilter failed (hr=0x{hr:X8}) — may not be an STA thread");
         return filter;
     }
 

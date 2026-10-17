@@ -19,12 +19,12 @@ public static class RunnerVerdict
         if (modalDetail != null)
             return (Fail, modalDetail + (runError != null ? $" | COM: {runError}" : ""));
         if (sessionDead && runError != null)
-            return (Skipped, $"세션 종료로 미실행(에러는 오탐: {runError})");
+            return (Skipped, $"not run because the session ended (error was a false positive: {runError})");
         if (runError != null)
-            return (Fail, $"런타임 에러: {runError}");
+            return (Fail, $"runtime error: {runError}");
         if (failedAsserts.Count > 0)
             return (Fail, string.Join(" | ", failedAsserts.Take(5))
-                          + (failedAsserts.Count > 5 ? $" 외 {failedAsserts.Count - 5}건" : ""));
+                          + (failedAsserts.Count > 5 ? $" and {failedAsserts.Count - 5} more" : ""));
         return (Pass, null);
     }
 }

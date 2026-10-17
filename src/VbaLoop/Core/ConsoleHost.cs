@@ -60,7 +60,7 @@ public static class ConsoleHost
     {
         if (!IsOwnConsole() || !CanPrompt) return;
         Console.WriteLine();
-        Console.Write("계속하려면 Enter를 누르세요...");
+        Console.Write("Press Enter to continue...");
         try { Console.ReadLine(); } catch { /* 무시 */ }
     }
 }

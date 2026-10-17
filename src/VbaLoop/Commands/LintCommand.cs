@@ -41,7 +41,7 @@ public static class LintCommand
 
         if (findings.Count == 0)
         {
-            o.HumanLines.Add($"lint 통과: {fileCount}개 파일, 위반 없음 (CP{codePage})");
+            o.HumanLines.Add($"lint passed: {fileCount} files, no violations (CP{codePage})");
             log.Write("info", "lint_clean", new { fileCount });
             return o;
         }
@@ -49,11 +49,11 @@ public static class LintCommand
         foreach (var f in findings.Take(50))
             o.HumanLines.Add($"  {f.File}{(f.Line != null ? $":{f.Line}" : "")} [{f.Code}] {f.Message}");
         if (findings.Count > 50)
-            o.HumanLines.Add($"  ... 외 {findings.Count - 50}건");
+            o.HumanLines.Add($"  ... and {findings.Count - 50} more");
 
         log.Write("warn", "lint_findings", new { count = findings.Count });
-        o.Fail($"lint 위반 {findings.Count}건 / {fileCount}개 파일",
-            "위 항목 수정 후 재실행 — ENCODING은 push가 어차피 거부하므로 최우선");
+        o.Fail($"lint violations: {findings.Count} across {fileCount} files",
+            "fix the items above and rerun — fix ENCODING first, since push rejects it anyway");
         return o;
     }
 }

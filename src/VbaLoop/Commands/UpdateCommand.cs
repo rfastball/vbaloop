@@ -34,19 +34,19 @@ public static class UpdateCommand
         catch (HttpRequestException e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             // releases/latest는 정식 릴리스만 본다 — prerelease만 있으면 404
-            o.HumanLines.Add("아직 정식 릴리스가 없음 - 갱신할 것이 없음");
+            o.HumanLines.Add("No official release yet - nothing to update");
             o.Payload = new { mode = "check", current = installed, latest = (string?)null, updateAvailable = false, target };
             return o;
         }
         catch (Exception e)
         {
-            o.Fail($"릴리스 정보를 가져오지 못함: {e.Message}",
-                "네트워크 확인 후 재시도 (또는 install.ps1로 재설치)", environment: true);
+            o.Fail($"Could not fetch release info: {e.Message}",
+                "Check the network and retry (or reinstall with install.ps1)", environment: true);
             return o;
         }
         if (info == null)
         {
-            o.Fail("최신 릴리스를 판독할 수 없음(semver 태그 아님)", $"https://github.com/{GitHubRelease.Repo}/releases 확인");
+            o.Fail("Cannot parse the latest release (tag is not semver)", $"Check https://github.com/{GitHubRelease.Repo}/releases");
             return o;
         }
 
@@ -58,14 +58,14 @@ public static class UpdateCommand
         var baseline = SemVer.ParseOrNull(installed);
         bool newer = baseline == null || latest.CompareTo(baseline) > 0;
 
-        o.HumanLines.Add($"최신 릴리스: {info.Version} ({info.Tag})");
-        o.HumanLines.Add($"설치본: {installed ?? "없음"} ({target})");
+        o.HumanLines.Add($"Latest release: {info.Version} ({info.Tag})");
+        o.HumanLines.Add($"Installed: {installed ?? "none"} ({target})");
         if (!runningInstalled)
-            o.HumanLines.Add($"실행 exe: {ExeVersion.Text} ({Environment.ProcessPath ?? "미상"})");
+            o.HumanLines.Add($"Running exe: {ExeVersion.Text} ({Environment.ProcessPath ?? "unknown"})");
 
         if (opts.Check || (!newer && !opts.Force))
         {
-            o.HumanLines.Add(newer ? $"갱신 가능: vbaloop update" : "이미 최신");
+            o.HumanLines.Add(newer ? $"Update available: vbaloop update" : "already up to date");
             o.Payload = new { mode = "check", current = installed, latest = info.Version, updateAvailable = newer, target };
             return o;
         }
@@ -75,42 +75,42 @@ public static class UpdateCommand
         {
             Directory.CreateDirectory(tmp);
             if (!info.Assets.TryGetValue(GitHubRelease.ExeAsset, out var exeUrl))
-                throw new CliError($"릴리스 {info.Tag}에 {GitHubRelease.ExeAsset}가 없음");
+                throw new CliError($"Release {info.Tag} has no {GitHubRelease.ExeAsset}");
             if (!info.Assets.TryGetValue(GitHubRelease.ChecksumsAsset, out var sumUrl))
-                throw new CliError($"릴리스 {info.Tag}에 {GitHubRelease.ChecksumsAsset}가 없음 - 검증할 수 없는 exe는 설치하지 않음");
+                throw new CliError($"Release {info.Tag} has no {GitHubRelease.ChecksumsAsset} - an exe that cannot be verified is not installed");
 
             string tmpExe = Path.Combine(tmp, GitHubRelease.ExeAsset);
             string tmpSums = Path.Combine(tmp, GitHubRelease.ChecksumsAsset);
-            Progress(opts, $"다운로드: {info.Tag} {GitHubRelease.ExeAsset}");
+            Progress(opts, $"Downloading: {info.Tag} {GitHubRelease.ExeAsset}");
             using (var http = GitHubRelease.CreateClient(DownloadTimeout))
             {
                 Download(http, exeUrl, tmpExe);
                 Download(http, sumUrl, tmpSums);
             }
             var expected = GitHubRelease.ExpectedHash(File.ReadAllText(tmpSums), GitHubRelease.ExeAsset)
-                ?? throw new CliError($"checksums.txt에 {GitHubRelease.ExeAsset} 항목이 없음 - 검증할 수 없는 exe는 설치하지 않음");
+                ?? throw new CliError($"checksums.txt has no entry for {GitHubRelease.ExeAsset} - an exe that cannot be verified is not installed");
             var actual = GitHubRelease.Sha256Hex(tmpExe);
             if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
-                throw new CliError($"체크섬 불일치 - 다운로드가 손상되었거나 변조됨 (expected {expected}, actual {actual})",
-                    "재시도. 반복되면 설치하지 말고 리포트");
-            o.HumanLines.Add($"SHA256 확인: {actual}");
+                throw new CliError($"Checksum mismatch - download is corrupted or tampered with (expected {expected}, actual {actual})",
+                    "Retry. If it repeats, do not install; report it");
+            o.HumanLines.Add($"SHA256 verified: {actual}");
 
             SelfReplace.Replace(tmpExe, target);
-            o.HumanLines.Add($"설치: {target}" + (runningInstalled ? " (이전 exe는 다음 실행 때 정리)" : ""));
+            o.HumanLines.Add($"Installed: {target}" + (runningInstalled ? " (old exe is cleaned up on next run)" : ""));
             try
             {
-                if (SelfInstall.EnsureOnPath()) o.HumanLines.Add($"PATH 등록: {SelfInstall.InstallDir}");
+                if (SelfInstall.EnsureOnPath()) o.HumanLines.Add($"PATH registered: {SelfInstall.InstallDir}");
             }
-            catch (CliError e) { o.HumanLines.Add($"PATH 등록 실패(설치는 완료): {e.Message}"); }
+            catch (CliError e) { o.HumanLines.Add($"PATH registration failed (install completed): {e.Message}"); }
         }
         catch (CliError e)
         {
-            o.Fail(e.Message, e.Hint ?? "vbaloop update 재시도", e.Environment);
+            o.Fail(e.Message, e.Hint ?? "retry vbaloop update", e.Environment);
             return o;
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
         {
-            o.Fail($"다운로드 실패: {e.Message}", "네트워크 확인 후 vbaloop update 재시도", environment: true);
+            o.Fail($"Download failed: {e.Message}", "Check the network and retry vbaloop update", environment: true);
             return o;
         }
         finally
@@ -120,11 +120,11 @@ public static class UpdateCommand
 
         var installedNow = QueryExeVersion(target);
         if (installedNow != info.Version)
-            o.HumanLines.Add($"주의: 설치된 exe가 {installedNow ?? "미상"}을 보고함 (기대 {info.Version})");
+            o.HumanLines.Add($"Warning: installed exe reports {installedNow ?? "unknown"} (expected {info.Version})");
 
         // 관리 파일 수렴은 새 exe가 해야 한다 - 이 프로세스의 임베디드 정본은 옛 버전이다
         bool runInit = opts.Yes || (!opts.Json && ConsoleHost.Confirm(
-            "새 exe로 init --all을 실행해 등록된 프로젝트의 관리 파일을 수렴할까요?", defaultYes: true, fallback: false));
+            "Run init --all with the new exe to converge managed files of registered projects?", defaultYes: true, fallback: false));
         object? initAll = null;
         if (runInit)
         {
@@ -141,11 +141,11 @@ public static class UpdateCommand
                 o.HumanLines.AddRange(SplitLines(stderr));
             }
             if (exit != 0)
-                o.Fail($"init --all이 exit {exit}로 끝남 (exe 갱신은 완료)", "init --all 출력의 [FAIL]/[REFUSED] 확인 후 vbaloop init --all 재실행");
+                o.Fail($"init --all exited with {exit} (exe update completed)", "Check [FAIL]/[REFUSED] in the init --all output, then rerun vbaloop init --all");
         }
         else
         {
-            o.HumanLines.Add("관리 파일 수렴: vbaloop init --all (또는 각 프로젝트에서 vbaloop init) 후 LogShim이 바뀐 프로젝트는 vbaloop push");
+            o.HumanLines.Add("Converge managed files: vbaloop init --all (or vbaloop init in each project), then vbaloop push for projects whose LogShim changed");
         }
 
         o.Payload = new
@@ -205,7 +205,7 @@ public static class UpdateCommand
         foreach (var a in args) psi.ArgumentList.Add(a);
         // 자식이 다시 업데이트 확인 자식을 띄우지 않게(이 명령이 방금 캐시를 썼다)
         psi.Environment[UpdateCheck.OptOutEnv] = "1";
-        using var p = Process.Start(psi) ?? throw new CliError($"{exe} 실행 실패");
+        using var p = Process.Start(psi) ?? throw new CliError($"Failed to run {exe}");
         var outTask = p.StandardOutput.ReadToEndAsync();
         var errTask = p.StandardError.ReadToEndAsync();
         if (!p.WaitForExit(timeout ?? Timeout.InfiniteTimeSpan))

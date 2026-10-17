@@ -37,7 +37,7 @@ public static class TestCommand
 
         if (sup.TimedOut)
         {
-            o.Fail($"test 타임아웃({timeoutSec}s): 자식 러너 종료, 세션 오염 처리 — {sup.RecoveryTail}",
+            o.Fail($"test timeout ({timeoutSec}s): child runner terminated, session marked poisoned — {sup.RecoveryTail}",
                 sup.SessionHint, environment: true);
             return o;
         }
@@ -46,14 +46,14 @@ public static class TestCommand
         {
             log.Write("error", "runner_poisoned", new { runId });
             o.Payload = sup.Root != null ? BuildPayload(sup.Root.Value, sessionDied: false) : null;
-            o.Fail((sup.Error ?? "자식 러너에서 치명적 COM 오류") + $" — {sup.RecoveryTail}",
+            o.Fail((sup.Error ?? "fatal COM error in child runner") + $" — {sup.RecoveryTail}",
                 sup.SessionHint, environment: true);
             return o;
         }
         if (sup.ExitCode != 0 || sup.Root == null)
         {
             log.Write("error", "runner_failed", new { runId, exitCode = sup.ExitCode, stderr = sup.Stderr });
-            o.Fail(sup.Error ?? $"자식 러너 실패 (exit {sup.ExitCode}): {RunnerSupervisor.Truncate(sup.Stderr, 300)}",
+            o.Fail(sup.Error ?? $"child runner failed (exit {sup.ExitCode}): {RunnerSupervisor.Truncate(sup.Stderr, 300)}",
                 sup.Hint);
             return o;
         }
@@ -74,8 +74,8 @@ public static class TestCommand
                 .Count(e => e.TryGetProperty("kind", out var k) && k.GetString() == "vbe_modal");
             if (modalCount > 0)
                 o.HumanLines.Add(sessionDied
-                    ? $"모달 자동 해제 {modalCount}건 — 세션 종료됨, 첫 FAIL의 모달 본문이 진짜 신호 (상세는 payload.watchdog)"
-                    : $"모달 자동 해제 {modalCount}건 — 세션 유지됨 (상세는 payload.watchdog)");
+                    ? $"{modalCount} modal(s) auto-dismissed — session ended, the first FAIL's modal text is the real signal (details in payload.watchdog)"
+                    : $"{modalCount} modal(s) auto-dismissed — session kept (details in payload.watchdog)");
         }
         foreach (var t in root.GetProperty("tests").EnumerateArray())
         {
@@ -87,21 +87,21 @@ public static class TestCommand
                 o.HumanLines.Add($"  FAIL {name}" + (detail != null ? $" — {detail}" : ""));
         }
         if (skipped > 0)
-            o.HumanLines.Add($"  SKIP {skipped}건 — 세션 종료로 미실행");
+            o.HumanLines.Add($"  SKIP {skipped} — not run because the session ended");
 
         if (sessionDied)
-            o.HumanLines.Add($"주의: 컴파일 오류 모달 해제로 Excel 세션이 종료됨 — {sup.RestartNote}");
+            o.HumanLines.Add($"Warning: Excel session ended after dismissing a compile error modal — {sup.RestartNote}");
         if (sup.Marker != null)
-            o.HumanLines.Add($"주의: {sup.RecoveryTail} — 해제 전까지 세션 명령은 exit 3");
+            o.HumanLines.Add($"Warning: {sup.RecoveryTail} — session commands exit 3 until cleared");
 
         log.Write("info", "test_done", new { runId, pass, fail, skipped, sessionDied });
         if (fail > 0)
-            o.Fail($"테스트 실패 {fail}건 (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
-                   + ") — 실패 레코드는 payload.tests 참조"
-                   + (sessionDied ? $" (세션 종료됨, {sup.RestartNote})" : ""),
+            o.Fail($"{fail} test failure(s) (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
+                   + ") — see payload.tests for failure records"
+                   + (sessionDied ? $" (session ended, {sup.RestartNote})" : ""),
                 sessionDied ? sup.SessionHint : null);
         else if (skipped > 0)
-            o.Fail($"세션 종료로 테스트 {skipped}건 미실행 (pass {pass}) — {sup.RestartNote}, 재실행 필요",
+            o.Fail($"{skipped} test(s) not run because the session ended (pass {pass}) — {sup.RestartNote}, rerun required",
                 sup.SessionHint);
         else if (sessionDied)
             o.Hint = sup.SessionHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우

@@ -45,7 +45,7 @@ internal sealed class ExcelScope : IDisposable
             if (r.Action == "started")
             {
                 o.Session = new { action = "started", pid = r.Meta.Pid, workbook = r.Meta.WorkbookFullName };
-                o.HumanLines.Add($"세션 자동 시작 (PID {r.Meta.Pid})");
+                o.HumanLines.Add($"Session auto-started (PID {r.Meta.Pid})");
             }
             return new ExcelScope(cfg, log, o, r);
         }
@@ -76,7 +76,7 @@ internal sealed class ExcelScope : IDisposable
             if (meta != null && ProcessIdentity.Identify(meta.Pid, meta.ExcelStartTime) != IdentityState.Gone)
             {
                 var (res, marker, why) = RecoveryGate.Resolve(cfg, meta, "ephemeral_leftover",
-                    "이전 명령이 정리하지 못한 일회용 Excel", meta.LastCommand, log);
+                    "ephemeral Excel left over by a previous command", meta.LastCommand, log);
                 log.Write("warn", "ephemeral_leftover", new { pid = meta.Pid, result = res.ToString(), why });
                 TryDelete(file);
                 if (res == RecoveryGate.Resolution.Quarantined)
@@ -115,11 +115,11 @@ internal sealed class ExcelScope : IDisposable
         }
 
         var (res, mk, why) = RecoveryGate.Resolve(_cfg, Meta, "ephemeral_cleanup",
-            healthy ? "일회용 Excel Quit 실패" : current?.PoisonReason ?? Meta.PoisonReason, Meta.LastCommand, _log);
+            healthy ? "ephemeral Excel Quit failed" : current?.PoisonReason ?? Meta.PoisonReason, Meta.LastCommand, _log);
         TryDelete(Meta.FilePath);
         if (res == RecoveryGate.Resolution.Quarantined)
         {
-            _o.HumanLines.Add($"주의: 일회용 Excel {RecoveryGate.Explain(res, mk, why)} — 해제 전까지 세션 명령은 exit 3");
+            _o.HumanLines.Add($"Note: ephemeral Excel {RecoveryGate.Explain(res, mk, why)} — session commands exit 3 until cleared");
             _o.Hint ??= RecoveryGate.HintFor(mk!);
         }
     }
@@ -148,7 +148,7 @@ internal sealed class ExcelScope : IDisposable
                 App.DisplayAlerts = true;
                 App.Visible = true;
                 _log.Write("warn", "ephemeral_handed_over", new { pid = Meta.Pid, foreign });
-                _o.HumanLines.Add($"주의: 일회용 Excel(PID {Meta.Pid})에 도구 외 워크북이 열려 있어 종료하지 않고 화면에 표시함: "
+                _o.HumanLines.Add($"Note: ephemeral Excel (PID {Meta.Pid}) has non-tool workbooks open; not closed, made visible: "
                                   + string.Join(", ", foreign));
                 return true;
             }

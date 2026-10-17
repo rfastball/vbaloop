@@ -102,8 +102,8 @@ public static class DiffCommand
                 .Where(e => string.Equals(e.Name, opts.Module, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
             if (matches.Length == 0)
-                throw new CliError($"미지 모듈: {opts.Module} - 워크북/src 어느 쪽에도 없음",
-                    "vbaloop diff --json으로 전체 모듈 목록 확인");
+                throw new CliError($"unknown module: {opts.Module} - not in the workbook or src",
+                    "list all modules with vbaloop diff --json");
             shown = matches;
             bool found = bodies.TryGetValue(opts.Module, out var body);
             // verdict/detail을 덤프에 함께 실어 단건 조회가 라인 근거(firstDiffLine 등)를 바로
@@ -127,7 +127,7 @@ public static class DiffCommand
             $"skipped {summary.skipped}, managed {summary.managed}");
         foreach (var e in shown.Where(e => e.Verdict is not ("same" or "managed")))
         {
-            var extra = e.Detail?.FirstDiffLine != null ? $" (첫 차이 {e.Detail.FirstDiffLine}행)" : "";
+            var extra = e.Detail?.FirstDiffLine != null ? $" (first difference at line {e.Detail.FirstDiffLine})" : "";
             var note = e.Note != null ? $" - {e.Note}" : "";
             o.HumanLines.Add($"  {e.Verdict}: {e.Name}{extra}{note}");
         }

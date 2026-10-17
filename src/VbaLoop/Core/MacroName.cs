@@ -15,18 +15,18 @@ public static class MacroName
         string s = (input ?? "").Trim();
         if (s.Length == 0)
         {
-            error = "매크로 이름이 비어 있음";
+            error = "macro name is empty";
             return false;
         }
         if (s.IndexOfAny(new[] { '!', '\'', '"', ' ', '\t', '[', ']' }) >= 0)
         {
-            error = $"허용되지 않는 문자 포함: {s} — 워크북 한정('...'!)은 자동으로 붙음";
+            error = $"contains disallowed characters: {s} — workbook qualification ('...'!) is added automatically";
             return false;
         }
         var parts = s.Split('.');
         if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length == 0)
         {
-            error = $"Module.Proc 형식이 아님: {s} — 모듈 한정 호출 필수";
+            error = $"not in Module.Proc form: {s} — module-qualified call required";
             return false;
         }
         module = parts[0];

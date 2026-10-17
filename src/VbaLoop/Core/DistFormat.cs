@@ -30,8 +30,8 @@ public static class DistFormat
             ".xlsm" => DistOutputKind.MacroWorkbook,
             ".xlam" => DistOutputKind.AddIn,
             _ => throw new CliError(
-                $"--out 확장자 미지원: '{(ext.Length == 0 ? "(없음)" : ext)}'",
-                "지원 확장자: .xlsm(매크로 워크북), .xlam(애드인)"),
+                $"--out extension not supported: '{(ext.Length == 0 ? "(none)" : ext)}'",
+                "Supported extensions: .xlsm (macro workbook), .xlam (add-in)"),
         };
     }
 

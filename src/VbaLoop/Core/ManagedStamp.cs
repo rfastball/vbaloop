@@ -29,7 +29,7 @@ public static class ManagedStamp
 {
     public const string Section = "vbaloop";
     public const string Key = "managed_by";
-    public const string UpdateHint = "vbaloop update";
+    public const string UpdateHint = "ask the user to run vbaloop update (do not run init or edit managed_by)";
 
     private static readonly Regex SectionHeader = new(@"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$");
     private static readonly Regex KeyLine = new(@"^\s*managed_by\s*=\s*""([^""]*)""\s*(#.*)?$");
@@ -92,7 +92,7 @@ public static class ManagedStamp
 
     /// <summary>exe-older 상태의 한 줄 설명(에러·경고 공용).</summary>
     public static string DescribeExeOlder(string stamp, string exeVersion)
-        => $"이 프로젝트는 vbaloop {stamp}가 관리 중인데 실행 exe는 {exeVersion}으로 더 오래됨";
+        => $"This project is managed by vbaloop {stamp} but the running exe is older ({exeVersion})";
 
     /// <summary>
     /// [vbaloop] managed_by를 version으로 upsert. 다른 라인·주석·개행 스타일은 보존한다.
@@ -133,7 +133,7 @@ public static class ManagedStamp
         while (lines.Count > 0 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
         if (lines.Count > 0) lines.Add("");
         lines.Add($"[{Section}]");
-        lines.Add("# 관리 파일을 마지막으로 쓴 vbaloop 버전. vbaloop init이 기록한다 - 직접 수정 금지");
+        lines.Add("# vbaloop version that last wrote the managed files. Recorded by vbaloop init - do not edit directly");
         lines.Add(keyLine);
         return string.Join(nl, lines) + nl;
     }

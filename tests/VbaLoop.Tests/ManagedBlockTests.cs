@@ -5,7 +5,7 @@ namespace VbaLoop.Tests;
 
 public class ManagedBlockTests
 {
-    private static readonly string[] Body = { "## 개발 루프 (vbaloop)", "", "본문 라인 1", "- 규칙 A" };
+    private static readonly string[] Body = { "## Development loop (vbaloop)", "", "본문 라인 1", "- 규칙 A" };
 
     private static string Block(string eol = "\r\n")
         => ManagedBlock.StartMarker + eol + string.Join(eol, Body) + eol + ManagedBlock.EndMarker;
@@ -54,6 +54,15 @@ public class ManagedBlockTests
         var (text, changed) = ManagedBlock.Upsert(existing, Body);
         Assert.True(changed);
         Assert.Equal("# 헤더\r\n\r\n" + Block() + "\r\n", text);
+    }
+
+    [Fact]
+    public void Upsert_UnmarkedEnglishHeading_ReplacedUpToNextH2()
+    {
+        var existing = "# 헤더\r\n\r\n## Development loop (vbaloop)\r\n옛 절차\r\n\r\n## 아키텍처\r\n뒤쪽 유지\r\n";
+        var (text, changed) = ManagedBlock.Upsert(existing, Body);
+        Assert.True(changed);
+        Assert.Equal("# 헤더\r\n\r\n" + Block() + "\r\n\r\n## 아키텍처\r\n뒤쪽 유지\r\n", text);
     }
 
     [Fact]

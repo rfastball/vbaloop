@@ -34,9 +34,9 @@ public static class DistCommand
         bool strip = opts.StripComments || cfg.DistStripComments;
         string? bootstrap = opts.Bootstrap ?? cfg.DistBootstrap;
         if (bootstrap != null && !MacroName.TryParse(bootstrap, out _, out _, out var bootErr))
-            throw new CliError($"--bootstrap 형식 오류: {bootErr}", "형식: Module.Proc");
+            throw new CliError($"--bootstrap format error: {bootErr}", "Format: Module.Proc");
         if (PathDrift.SamePath(outPath, cfg.WorkbookPath))
-            throw new CliError("--out이 원본 워크북과 동일 — 아티팩트는 별도 파일이어야 함");
+            throw new CliError("--out is the same as the source workbook — the artifact must be a separate file");
 
         using var cmdLock = CommandMutex.Acquire(cfg);
 
@@ -50,10 +50,10 @@ public static class DistCommand
             log.Write("error", "dist_dangling_refs", new { count = dangling.Count });
             o.Payload = new { danglingRefs = dangling.Take(20).Select(d => new { d.InModule, d.Line, d.Symbol, d.Kind }) };
             o.Fail(
-                $"컴파일 안전 실패: 제외 모듈의 심볼을 잔존 모듈이 참조 — " +
+                $"Compile safety failure: remaining modules reference symbols of excluded modules — " +
                 string.Join(", ", dangling.Take(5).Select(d => $"{d.InModule}:{d.Line} {d.Symbol}({d.Kind})")) +
-                (dangling.Count > 5 ? $" 외 {dangling.Count - 5}건" : ""),
-                "제외 대상을 좁히거나 해당 참조를 제거 (Test 모듈은 서로만 참조해야 통째 제거 안전)");
+                (dangling.Count > 5 ? $" and {dangling.Count - 5} more" : ""),
+                "Narrow the exclusions or remove those references (Test modules are safe to drop wholesale only if they reference each other alone)");
             return o;
         }
 
@@ -62,12 +62,12 @@ public static class DistCommand
         string fingerprint = Fingerprint.Compute(cfg.SrcRoot);
         if (sync.LastPushFingerprint != fingerprint)
         {
-            o.Fail("src와 워크북이 미동기화 — dist는 마지막 push 상태의 사본을 base로 삼는다",
-                "vbaloop push로 src를 워크북에 반영한 뒤 재시도");
+            o.Fail("src and workbook are out of sync — dist uses the copy from the last push as its base",
+                "Apply src to the workbook with vbaloop push, then retry");
             return o;
         }
         if (!File.Exists(cfg.WorkbookPath))
-            throw new CliError($"base 워크북 파일 없음: {cfg.WorkbookPath}", environment: true);
+            throw new CliError($"base workbook file not found: {cfg.WorkbookPath}", environment: true);
 
         // 3. 버전 스탬프 재료
         string version = cfg.DistVersion ?? "0.0.0";
@@ -90,7 +90,7 @@ public static class DistCommand
         // 5. 임시 인스턴스에서 사본(stage) 변형
         var warnings = new List<string>();
         if (rev == NoRevSentinel)
-            warnings.Add($"git rev 확인 불가(비-repo 또는 git 부재) — BuildRev='{NoRevSentinel}'");
+            warnings.Add($"git rev unavailable (not a repo or git missing) — BuildRev='{NoRevSentinel}'");
         bool moved = false;
         var filter = OleMessageFilter.Register();
         ExcelLauncher.LaunchResult? launch = null;
@@ -110,8 +110,8 @@ public static class DistCommand
                 try { wb = app.Workbooks.Open(stagePath, 0, false); }
                 finally { app.AutomationSecurity = prevSec; }
                 if (Convert.ToBoolean(wb.ReadOnly))
-                    throw new CliError($"사본이 read-only로 열림: {stagePath}",
-                        "출력 경로의 잠금/권한 확인", environment: true);
+                    throw new CliError($"copy opened read-only: {stagePath}",
+                        "Check locks/permissions on the output path", environment: true);
 
                 dynamic proj = SessionService.GetVbProject(wb);
                 var mut = MutateProject(proj, classified, strip, version, rev, builtAt, warnings, log);
@@ -121,7 +121,7 @@ public static class DistCommand
                 DistCompileVerdict.Verdict? compile = null;
                 if (opts.SkipCompile)
                 {
-                    warnings.Add("--skip-compile: 게시 전 VBE 컴파일 검증 생략");
+                    warnings.Add("--skip-compile: VBE compile check skipped before publishing");
                     log.Write("warn", "dist_compile_skipped", null);
                 }
                 else
@@ -139,15 +139,15 @@ public static class DistCommand
                         };
                         o.Fail(
                             compile.Kind == DistCompileVerdict.Kind.CompileError
-                                ? $"컴파일 오류 — 게시하지 않음: {compile.Detail}"
-                                : $"컴파일 검증 불가 — 게시하지 않음: {compile.Detail}",
+                                ? $"Compile error — not published: {compile.Detail}"
+                                : $"Compile check unavailable — not published: {compile.Detail}",
                             compile.Kind == DistCompileVerdict.Kind.CompileError
-                                ? "src에서 해당 오류를 고치고 push 후 재시도 (제외 모듈 참조가 원인이면 [dist] exclude/@dist 확인)"
-                                : "VBE 접근(AccessVBOM)과 모달 상태 확인. 검증 없이 게시하려면 --skip-compile");
+                                ? "Fix the error in src, push, then retry (if caused by references to excluded modules, check [dist] exclude/@dist)"
+                                : "Check VBE access (AccessVBOM) and modal state with vbaloop doctor, then retry. Publish without the check (--skip-compile) only after the user confirms");
                         return o;
                     }
                     if (compile.Kind == DistCompileVerdict.Kind.Unverified)
-                        warnings.Add($"컴파일 검증 불완전: {compile.Detail}");
+                        warnings.Add($"Compile check incomplete: {compile.Detail}");
                 }
 
                 object? bootResult = null;
@@ -203,16 +203,16 @@ public static class DistCommand
                     published = true,
                     warnings,
                 };
-                o.HumanLines.Add($"dist 완료: {outPath} [{formatLabel}]");
-                o.HumanLines.Add($"  버전 {version} (rev {rev}, built {builtAt})");
-                o.HumanLines.Add($"  포함 {classified.Included.Count} / 제외 {classified.ExcludedNames.Count}" +
-                    (mut.Removed > 0 ? $" (제거 {mut.Removed})" : "") +
-                    (strip ? $", 주석제거 {mut.Stripped}모듈" : "") +
-                    (mut.LogShimFlipped ? ", LogShim 무해화" : ""));
-                if (bootstrap != null) o.HumanLines.Add($"  부트스트랩 실행: {bootstrap}");
-                o.HumanLines.Add(compile == null ? "  컴파일 검증: 생략(--skip-compile)"
-                    : $"  컴파일 검증: {compile.Label}");
-                foreach (var w in warnings) o.HumanLines.Add($"  주의: {w}");
+                o.HumanLines.Add($"dist done: {outPath} [{formatLabel}]");
+                o.HumanLines.Add($"  version {version} (rev {rev}, built {builtAt})");
+                o.HumanLines.Add($"  included {classified.Included.Count} / excluded {classified.ExcludedNames.Count}" +
+                    (mut.Removed > 0 ? $" (removed {mut.Removed})" : "") +
+                    (strip ? $", comments stripped in {mut.Stripped} modules" : "") +
+                    (mut.LogShimFlipped ? ", LogShim sanitized" : ""));
+                if (bootstrap != null) o.HumanLines.Add($"  bootstrap run: {bootstrap}");
+                o.HumanLines.Add(compile == null ? "  compile check: skipped (--skip-compile)"
+                    : $"  compile check: {compile.Label}");
+                foreach (var w in warnings) o.HumanLines.Add($"  warning: {w}");
                 return o;
             }
             catch
@@ -226,7 +226,7 @@ public static class DistCommand
             // stage 정리는 finally에서(임시 Excel kill 후 핸들 해제까지 재시도) — 여기서
             // 지우면 아직 열려있는 임시 인스턴스가 파일을 물고 있어 조용히 실패한다.
             if (ex is CliError) throw;
-            o.Fail($"dist 실패: {ex.GetType().Name}: {ex.Message}");
+            o.Fail($"dist failed: {ex.GetType().Name}: {ex.Message}");
             return o;
         }
         finally
@@ -263,7 +263,7 @@ public static class DistCommand
             if (!excludedSet.Contains(comp.Name)) continue;
             if (comp.Type == VbaProjectOps.TypeDocument)
             {
-                warnings.Add($"{comp.Name}: 문서/시트 모듈은 제거 불가 — 제외 무시");
+                warnings.Add($"{comp.Name}: document/sheet modules cannot be removed — exclusion ignored");
                 continue;
             }
             VbaProjectOps.VerifiedRemove(proj, comp.Comp, comp.Name);
@@ -298,7 +298,7 @@ public static class DistCommand
             if (changed) VbaProjectOps.ReplaceCode(comp.Comp.CodeModule, body);
         }
         if (!sawLogShim)
-            warnings.Add("LogShim 컴포넌트가 사본에 없음 — 무해화 생략(로깅 의존이 있으면 재벤더링 확인)");
+            warnings.Add("LogShim component missing from the copy — sanitize skipped (if logging is depended on, check re-vendoring)");
 
         // modBuildInfo 합성(§9.4): 있으면 교체, 없으면 추가
         var buildBody = VersionStamp.BuildInfoBody(version, rev, builtAt);
@@ -340,10 +340,10 @@ public static class DistCommand
         {
             if (killed)
                 throw new CliError(
-                    $"부트스트랩 타임아웃({BootstrapTimeoutSec}s): {macro} — 임시 Excel kill(모달/MsgBox 의심)",
-                    "부트스트랩 프로시저가 비대화형·컴파일 클린인지 확인");
-            throw new CliError($"부트스트랩 실행 실패: {macro}: {ex.Message}",
-                "사본에서 해당 프로시저가 정상 컴파일/실행되는지 확인");
+                    $"Bootstrap timeout ({BootstrapTimeoutSec}s): {macro} — temporary Excel killed (suspect modal/MsgBox)",
+                    "Check that the bootstrap procedure is non-interactive and compiles clean");
+            throw new CliError($"Bootstrap run failed: {macro}: {ex.Message}",
+                "Check that the procedure compiles and runs properly in the copy");
         }
         finally { done.Set(); }
         log.Write("info", "dist_bootstrap_done", new { macro });
@@ -360,7 +360,7 @@ public static class DistCommand
         }
         catch (Exception ex)
         {
-            warnings.Add($"문서속성 {name} 기입 실패(비치명): {ex.Message}");
+            warnings.Add($"Failed to write document property {name} (non-fatal): {ex.Message}");
         }
     }
 
@@ -368,14 +368,14 @@ public static class DistCommand
     private static List<DistModule> LoadSrcModules(ProjectConfig cfg, int codePage)
     {
         if (!Directory.Exists(cfg.SrcRoot))
-            throw new CliError($"src 루트 없음: {cfg.SrcRoot}", "vbaloop pull로 초기 생성");
+            throw new CliError($"src root not found: {cfg.SrcRoot}", "Create it initially with vbaloop pull");
 
         var files = Directory.EnumerateFiles(cfg.SrcRoot)
             .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".bas" or ".cls" or ".frm")
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (files.Count == 0)
-            throw new CliError($"src에 소스 파일이 없음: {cfg.SrcRoot}");
+            throw new CliError($"no source files in src: {cfg.SrcRoot}");
 
         var violations = new List<string>();
         var modules = new List<DistModule>();
@@ -392,8 +392,8 @@ public static class DistCommand
         }
         if (violations.Count > 0)
             throw new CliError(
-                $"인코딩 가드 실패 — CP{codePage} 밖 문자: {string.Join(" | ", violations.Take(5))}",
-                "해당 문자를 제거/치환 후 재시도");
+                $"Encoding guard failed — characters outside CP{codePage}: {string.Join(" | ", violations.Take(5))}",
+                "Remove/replace those characters, then retry");
         return modules;
     }
 
@@ -420,7 +420,7 @@ public static class DistCommand
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("git 시작 실패");
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("failed to start git");
         string outp = p.StandardOutput.ReadToEnd();
         p.WaitForExit(5000);
         return p.ExitCode == 0 ? outp : "";
@@ -462,6 +462,6 @@ public static class DistCommand
             try { File.Move(stagePath, outPath, overwrite: true); return; }
             catch (IOException ex) { last = ex; Thread.Sleep(200); }
         }
-        throw last ?? new IOException($"원자 이동 실패: {stagePath} -> {outPath}");
+        throw last ?? new IOException($"atomic move failed: {stagePath} -> {outPath}");
     }
 }

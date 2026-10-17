@@ -18,7 +18,7 @@ public static class WorkbookRollback
         if (meta == null) return null;
         if (!isAlive(meta.Pid, meta.ExcelStartTime)) return null;
         string state = meta.Poisoned ? "poisoned" : "active";
-        return $"세션 Excel(PID {meta.Pid}, {state})이 살아 있음 — 열린 워크북이 복원을 덮어쓰거나 파일을 잠근다";
+        return $"Session Excel (PID {meta.Pid}, {state}) is alive — the open workbook would overwrite the restore or lock the file";
     }
 
     /// <summary>
@@ -31,11 +31,11 @@ public static class WorkbookRollback
     public static void ReplaceWorkbook(string backupCopyPath, string? expectedSha256, string workbookPath)
     {
         if (!File.Exists(backupCopyPath))
-            throw new CliError($"백업 사본 없음: {backupCopyPath}");
+            throw new CliError($"backup copy not found: {backupCopyPath}");
         string actual = BackupStore.HashFile(backupCopyPath);
         if (!string.IsNullOrEmpty(expectedSha256) && !actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
-            throw new CliError($"백업 사본 해시 불일치 — 손상된 백업은 복원하지 않음: {backupCopyPath}",
-                "다른 백업을 선택 (rollback --list)");
+            throw new CliError($"Backup copy hash mismatch — a damaged backup is not restored: {backupCopyPath}",
+                "Choose another backup (rollback --list)");
 
         string dir = Path.GetDirectoryName(Path.GetFullPath(workbookPath))!;
         string tmp = Path.Combine(dir, $"{Path.GetFileName(workbookPath)}.vbaloop-rollback.{Environment.ProcessId}.tmp");
@@ -43,7 +43,7 @@ public static class WorkbookRollback
         {
             File.Copy(backupCopyPath, tmp, overwrite: true);
             if (!BackupStore.HashFile(tmp).Equals(actual, StringComparison.OrdinalIgnoreCase))
-                throw new CliError($"임시 사본 해시 불일치(디스크 쓰기 오류 의심): {tmp}", environment: true);
+                throw new CliError($"temporary copy hash mismatch (suspect disk write error): {tmp}", environment: true);
 
             if (!File.Exists(workbookPath))
             {
@@ -66,8 +66,8 @@ public static class WorkbookRollback
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new CliError(
-                $"워크북 교체 실패 — 정본은 그대로임: {ex.Message}",
-                "다른 Excel 창이 워크북을 열고 있으면 닫은 뒤 재시도 (vbaloop doctor로 잠금 프로세스 확인)",
+                $"Workbook replacement failed — canonical workbook unchanged: {ex.Message}",
+                "If another Excel window has the workbook open, close it and retry (find the locking process with vbaloop doctor)",
                 environment: true);
         }
         finally
@@ -77,8 +77,8 @@ public static class WorkbookRollback
 
         string after = BackupStore.HashFile(workbookPath);
         if (!after.Equals(actual, StringComparison.OrdinalIgnoreCase))
-            throw new CliError($"복원 후 정본 해시가 백업과 다름: {workbookPath}",
-                "안전 백업(pre-rollback)으로 되돌리거나 파일을 수동 확인", environment: true);
+            throw new CliError($"Canonical workbook hash differs from the backup after restore: {workbookPath}",
+                "Roll back to the safety backup (pre-rollback) or check the file manually", environment: true);
     }
 
     /// <summary>
