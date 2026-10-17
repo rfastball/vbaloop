@@ -30,7 +30,9 @@ public static class RunCommand
         LeaseService.AcquireOrRenew(cfg, "run", log);
 
         // 세션 확보 (auto-ensure: 없으면 스스로 기동)
-        var meta = SessionEnsure.ForCommand(cfg, log, o, "run").Meta;
+        // 일회용 모드는 정본을 읽기 전용으로 연다 — 테스트가 바꾼 시트·상태는 저장되지 않고 인스턴스와 함께 사라진다
+        using var ses = ExcelScope.Acquire(cfg, log, o, "run", ScopeAccess.Read);
+        var meta = ses.Meta;
 
         string runId = Guid.NewGuid().ToString("N");
         int timeoutSec = opts.TimeoutSec ?? DefaultTimeoutSec;
@@ -84,14 +86,14 @@ public static class RunCommand
             o.HumanLines.Add($"참고: 구간 내 실패 어서션 {failedAsserts}건 (run 성패와 무관, payload.run 참조)");
 
         if (sup.SessionDiedAfterModal)
-            o.HumanLines.Add("주의: 컴파일 오류 모달 해제로 Excel 세션이 종료됨 — 후속 명령 전에 session start 필요");
+            o.HumanLines.Add($"주의: 컴파일 오류 모달 해제로 Excel 세션이 종료됨 — {sup.RestartNote}");
         if (sup.Marker != null)
             o.HumanLines.Add($"주의: {sup.RecoveryTail} — 해제 전까지 세션 명령은 exit 3");
 
         log.Write("info", "run_done", new { runId, macro, result, elapsed, sessionDied = sup.SessionDiedAfterModal });
         if (result != "ok")
             o.Fail($"run {macro} 실패" + (detail != null ? $": {detail}" : "")
-                   + (sup.SessionDiedAfterModal ? " (세션 종료됨, session start 필요)" : ""),
+                   + (sup.SessionDiedAfterModal ? $" (세션 종료됨, {sup.RestartNote})" : ""),
                 sup.SessionDiedAfterModal ? sup.SessionHint : null);
         return o;
     }

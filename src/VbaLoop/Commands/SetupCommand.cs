@@ -332,7 +332,9 @@ public static class SetupCommand
                 Say();
                 Say("  주의: PATH는 새로 여는 셸부터 반영됩니다 — 지금 열려 있는 터미널은 재시작하세요.");
             }
-            if (verify != "skipped")
+            // 일회용 모드(기본)는 검증 명령이 끝나면 Excel도 닫힌다 — 세션이 남는 것은 persistent 모드뿐
+            bool sessionOpen = verify != "skipped" && File.Exists(Path.Combine(folder, "_dbg", "session.json"));
+            if (sessionOpen)
             {
                 Say();
                 Say("  참고: 검증을 위해 도구 소유 Excel 세션이 열려 있습니다(정상). 다음 명령이 재사용하며,");
@@ -376,7 +378,7 @@ public static class SetupCommand
                 claudeCli,
                 claudeLaunched,
                 repo = RepoUrl,
-                next = BuildNext(folder, opts.NoInstall, verify != "skipped"),
+                next = BuildNext(folder, opts.NoInstall, sessionOpen),
             };
             return o;
         }

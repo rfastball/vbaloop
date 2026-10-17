@@ -176,4 +176,12 @@ public class CliArgsTests
     [InlineData("--new")]
     public void RawArgsRequestJson_SetupValueOption_ConsumesValue(string opt)
         => Assert.False(CliArgs.RawArgsRequestJson(new[] { "setup", opt, "--json" }));
+
+    [Fact]
+    public void SessionMeta_Parsed()
+    {
+        var a = CliArgs.Parse(new[] { "__runner", "--session-meta", "_dbg/ephemeral/x.json" });
+        Assert.Equal("_dbg/ephemeral/x.json", a.SessionMeta);
+        Assert.Throws<VbaLoop.Core.CliError>(() => CliArgs.Parse(new[] { "__runner", "--session-meta" }));
+    }
 }

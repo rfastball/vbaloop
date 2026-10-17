@@ -54,8 +54,10 @@ public static class StatusCommand
 
         var lease = LeaseService.Inspect(cfg);
 
+        bool ephemeralMode = cfg.SessionMode == SessionMode.Ephemeral;
         o.HumanLines.Add($"session : {state}" + (marker != null ? $" ({marker.Describe()})"
-            : info.Detail != null ? $" ({info.Detail})" : ""));
+            : info.Detail != null ? $" ({info.Detail})"
+            : ephemeralMode && info.State == SessionState.None ? " (일회용 모드 — 명령마다 숨은 Excel을 띄우고 닫음)" : ""));
         o.HumanLines.Add(LeaseCommand.DescribeState(lease));
         o.HumanLines.Add($"workbook: {cfg.WorkbookPath}" + (File.Exists(cfg.WorkbookPath) ? "" : " (파일 없음!)"));
         o.HumanLines.Add($"config  : {cfg.TomlPath}");
@@ -68,12 +70,14 @@ public static class StatusCommand
             o.Hint = RecoveryGate.HintFor(marker);
         else if (info.State == SessionState.Busy)
             o.Hint = "Excel에서 셀 편집/열린 대화상자를 마친 뒤 재시도";
-        else if (info.State is SessionState.None or SessionState.Stale or SessionState.Poisoned)
+        else if (info.State is SessionState.Stale or SessionState.Poisoned
+                 || (info.State == SessionState.None && !ephemeralMode))
             o.Hint = "session start";
 
         o.Payload = new
         {
             state,
+            mode = ephemeralMode ? "ephemeral" : "persistent",
             detail = info.Detail,
             workbook = cfg.WorkbookPath,
             workbookExists = File.Exists(cfg.WorkbookPath),

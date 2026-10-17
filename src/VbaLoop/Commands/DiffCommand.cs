@@ -7,8 +7,8 @@ namespace VbaLoop.Commands;
 /// <summary>
 /// vbaloop diff (설계 §4): 워크북 VBProject vs src 읽기 전용 비교. 에이전트가 세션
 /// Excel에 직접 COM 접근하는 우회를 없애기 위한 공식 조회 경로 — src/워크북/sync.json
-/// 어디에도 쓰지 않는다. attach 전용(auto-ensure 없음 — 진단이 Excel을 띄우는 것 자체가
-/// 부작용), lease 미획득(조회는 쓰기 의도가 아님 — status 선례), CommandMutex만 획득
+/// 어디에도 쓰지 않는다. persistent 모드는 attach 전용(auto-ensure 없음 — 진단이 세션 Excel을
+/// 띄우는 것 자체가 부작용), 일회용 모드는 읽기 전용 일회용 인스턴스, lease 미획득(조회는 쓰기 의도가 아님 — status 선례), CommandMutex만 획득
 /// (동시 push/test와 같은 Excel STA 인터리브 차단). 차이 존재는 실패가 아니다 —
 /// exit 0 + payload.clean으로 보고한다.
 /// </summary>
@@ -22,7 +22,15 @@ public static class DiffCommand
         o.LogRecords = log.Records;
 
         using var cmdLock = CommandMutex.Acquire(cfg);
-        var (app, meta) = SessionService.AcquireOrThrow(cfg, "diff", log);
+        // 일회용 모드는 세션이 없는 것이 평상시라 읽기 전용 일회용 인스턴스로 본다(명시 세션이 있으면 그것).
+        // persistent 모드는 기존대로 attach 전용 — 진단이 세션 Excel을 띄우는 것 자체가 부작용이다.
+        using var ses = cfg.SessionMode == SessionMode.Ephemeral
+            ? ExcelScope.Acquire(cfg, log, o, "diff", ScopeAccess.Read)
+            : null;
+        dynamic app;
+        SessionMeta meta;
+        if (ses != null) (app, meta) = (ses.App, ses.Meta);
+        else (app, meta) = SessionService.AcquireOrThrow(cfg, "diff", log);
         var filter = OleMessageFilter.Register();
         try
         {

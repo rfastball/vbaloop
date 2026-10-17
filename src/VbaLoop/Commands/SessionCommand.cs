@@ -37,6 +37,8 @@ public static class SessionCommand
         o.HumanLines.Add(r.Action == "adopted"
             ? $"기존 세션 채택 (PID {r.Meta.Pid}{(r.Meta.IsExternal ? ", attach한 사용자 Excel" : "")}, no-op)"
             : $"세션 시작 (PID {r.Meta.Pid}, {Path.GetFileName(r.Meta.WorkbookFullName)})");
+        if (cfg.SessionMode == SessionMode.Ephemeral && r.Action == "started")
+            o.HumanLines.Add("일회용 모드지만 이 세션이 살아 있는 동안 push/pull/test/run/diff는 이 Excel을 씀 — 끝내려면 session stop");
         o.Payload = new { action = r.Action, pid = r.Meta.Pid, hwnd = r.Meta.Hwnd, workbook = r.Meta.WorkbookFullName };
         return o;
     }

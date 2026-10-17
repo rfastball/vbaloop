@@ -83,4 +83,46 @@ public class ProjectConfigTests
         var cfg = LoadToml("[excel]\nworkbook = \"Book.xlsm\"");
         Assert.Equal(Path.Combine(cfg.RootDir, "_dbg", "backups"), cfg.BackupsDir);
     }
+
+
+    [Fact]
+    public void SessionMode_Absent_DefaultsToEphemeral()
+    {
+        var cfg = LoadToml("[excel]\nworkbook = \"Book.xlsm\"");
+        Assert.Equal(SessionMode.Ephemeral, cfg.SessionMode);
+        Assert.Equal(Path.Combine(cfg.RootDir, "_dbg", "ephemeral"), cfg.EphemeralDir);
+    }
+
+    [Theory]
+    [InlineData("ephemeral", SessionMode.Ephemeral)]
+    [InlineData("persistent", SessionMode.Persistent)]
+    [InlineData("Persistent", SessionMode.Persistent)]
+    public void SessionMode_Parsed(string value, SessionMode expected)
+    {
+        var cfg = LoadToml($"[excel]\nworkbook = \"Book.xlsm\"\nsession = \"{value}\"");
+        Assert.Equal(expected, cfg.SessionMode);
+    }
+
+    [Theory]
+    [InlineData("session = \"shared\"")]   // 오타/미지 값 - 조용히 기본값으로 떨어지면 안 됨
+    [InlineData("session = true")]
+    public void SessionMode_Invalid_FailsLoudly(string line)
+    {
+        Assert.Throws<CliError>(() => LoadToml("[excel]\nworkbook = \"Book.xlsm\"\n" + line));
+    }
+
+    [Fact]
+    public void PushCompile_DefaultsOn_AndParses()
+    {
+        Assert.True(LoadToml("[excel]\nworkbook = \"Book.xlsm\"").PushCompile);
+        Assert.False(LoadToml("[excel]\nworkbook = \"Book.xlsm\"\n[push]\ncompile = false").PushCompile);
+    }
+
+    [Theory]
+    [InlineData("compile = \"no\"")]
+    [InlineData("bogus = true")]
+    public void PushSection_Invalid_FailsLoudly(string line)
+    {
+        Assert.Throws<CliError>(() => LoadToml("[excel]\nworkbook = \"Book.xlsm\"\n[push]\n" + line));
+    }
 }

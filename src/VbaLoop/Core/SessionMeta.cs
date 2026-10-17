@@ -24,6 +24,13 @@ public sealed class SessionMeta
     [JsonIgnore] public bool IsExternal => Owner == OwnerExternal;
     public const string OwnerTool = "tool";
     public const string OwnerExternal = "external";
+    /// <summary>
+    /// 일회용 인스턴스(명령 하나 수명, 설계 §4 세션 모드) — 메타는 session.json이 아니라
+    /// _dbg\ephemeral\&lt;id&gt;.json에 있고, 명령이 끝나면 Excel과 함께 사라진다. owner는 tool이다.
+    /// </summary>
+    [JsonPropertyName("ephemeral")] public bool Ephemeral { get; set; }
+    /// <summary>이 메타를 읽거나 쓴 파일. poison 기록·삭제가 같은 파일로 가도록 호출자가 경로를 조립하지 않는다.</summary>
+    [JsonIgnore] public string FilePath { get; private set; } = "";
     // push 해시 캐시/타임스탬프는 세션이 아니라 프로젝트 수명 — SyncCache(sync.json)로 분리됨.
     // 구버전 session.json의 잔여 lastPush* 필드는 역직렬화에서 무시된다.
     [JsonPropertyName("poisoned")] public bool Poisoned { get; set; }
@@ -43,7 +50,9 @@ public sealed class SessionMeta
         if (!File.Exists(path)) return null;
         try
         {
-            return JsonSerializer.Deserialize<SessionMeta>(File.ReadAllText(path));
+            var meta = JsonSerializer.Deserialize<SessionMeta>(File.ReadAllText(path));
+            if (meta != null) meta.FilePath = path;
+            return meta;
         }
         catch (JsonException)
         {
@@ -58,12 +67,16 @@ public sealed class SessionMeta
         var tmp = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, MetaJson), new System.Text.UTF8Encoding(false));
         File.Move(tmp, path, overwrite: true);
+        FilePath = path;
     }
 
     public static void Delete(string path)
     {
         if (File.Exists(path)) File.Delete(path);
     }
+
+    /// <summary>자기 파일(<see cref="FilePath"/>)에 poison 기록.</summary>
+    public void MarkPoisoned(string reason, int? hResult) => MarkPoisoned(FilePath, reason, hResult);
 
     public void MarkPoisoned(string path, string reason, int? hResult)
     {

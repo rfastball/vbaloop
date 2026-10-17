@@ -30,6 +30,23 @@ public static class SessionService
     /// </summary>
     public static EnsureResult EnsureActive(ProjectConfig cfg, ToolLog log, string command)
     {
+        var adopted = AdoptExisting(cfg, log, command);
+        if (adopted != null) return adopted;
+
+        var meta = LaunchAndOpen(cfg, log, command, cfg.Visible, readOnly: false, cfg.SessionMetaPath,
+            ephemeral: false, out dynamic app);
+        log.Write("info", "session_started",
+            new { pid = meta.Pid, hwnd = meta.Hwnd, workbook = meta.WorkbookFullName });
+        return new EnsureResult(app, meta, "started");
+    }
+
+    /// <summary>
+    /// EnsureActive의 앞 절반: 격리 게이트 → 살아 있는 세션(session.json)이면 채택, busy면 exit 3,
+    /// stale/poisoned면 격리 규칙으로 정리하고 메타를 지운 뒤 null(=기동 필요). 일회용 모드도
+    /// 이것으로 명시 세션(session start/attach)을 먼저 찾는다.
+    /// </summary>
+    public static EnsureResult? AdoptExisting(ProjectConfig cfg, ToolLog log, string command)
+    {
         if (!File.Exists(cfg.WorkbookPath))
             throw new CliError($"워크북 파일 없음: {cfg.WorkbookPath}",
                 "vbaloop.toml의 [excel].workbook 경로 확인");
@@ -61,11 +78,31 @@ public static class SessionService
             SessionMeta.Delete(cfg.SessionMetaPath);
             log.Write("info", "stale_meta_cleaned", new { prevState = info.State.ToString() });
         }
+        return null;
+    }
 
+    /// <summary>
+    /// 일회용 인스턴스 기동(설계 §4 세션 모드): 숨은 Excel에 정본을 열고 메타를 metaPath에 기록한다.
+    /// readOnly면 ReadOnly:=True로 열어 사용자가 정본을 열어 둔 상태에서도 동작하고 저장은 불가능하다
+    /// (pull/diff/test/run). 쓰기(push)는 read-only 폴백을 거부한다. 정리는 호출자(ExcelScope) 몫.
+    /// </summary>
+    public static EnsureResult LaunchEphemeral(ProjectConfig cfg, ToolLog log, string command, bool readOnly,
+        string metaPath)
+    {
+        var meta = LaunchAndOpen(cfg, log, command, visible: false, readOnly, metaPath, ephemeral: true,
+            out dynamic app);
+        log.Write("info", "ephemeral_started",
+            new { pid = meta.Pid, hwnd = meta.Hwnd, workbook = meta.WorkbookFullName, readOnly });
+        return new EnsureResult(app, meta, "ephemeral");
+    }
+
+    private static SessionMeta LaunchAndOpen(ProjectConfig cfg, ToolLog log, string command, bool visible,
+        bool readOnly, string metaPath, bool ephemeral, out dynamic appOut)
+    {
         var filter = OleMessageFilter.Register();
         try
         {
-            var launch = ExcelLauncher.CreateNew(cfg.Visible);
+            var launch = ExcelLauncher.CreateNew(visible);
             dynamic app = launch.App;
             try
             {
@@ -80,7 +117,7 @@ public static class SessionService
                 dynamic wb;
                 try
                 {
-                    wb = app.Workbooks.Open(cfg.WorkbookPath, 0, false); // UpdateLinks:=0, ReadOnly:=False
+                    wb = app.Workbooks.Open(cfg.WorkbookPath, 0, readOnly); // UpdateLinks:=0
                 }
                 finally
                 {
@@ -89,8 +126,8 @@ public static class SessionService
 
                 // ReadOnly:=False 명시는 잠긴 파일에서 오류를 내지 않는다 — Excel이 조용히
                 // read-only로 폴백하고, 이후 Save가 기본 저장 위치로 SaveAs 오탈출해 split-brain을
-                // 만든다. read-only로는 세션을 성립시키지 않는다.
-                if (Convert.ToBoolean(wb.ReadOnly))
+                // 만든다. 쓰기 의도로는 read-only 세션을 성립시키지 않는다.
+                if (!readOnly && Convert.ToBoolean(wb.ReadOnly))
                 {
                     log.Write("error", "session_readonly_refused", new { workbook = cfg.WorkbookPath });
                     throw new CliError(
@@ -108,11 +145,11 @@ public static class SessionService
                     WorkbookFullName = Convert.ToString(wb.FullName) ?? cfg.WorkbookPath,
                     CreatedAt = DateTime.UtcNow.ToString("o"),
                     LastCommand = command,
+                    Ephemeral = ephemeral,
                 };
-                meta.Save(cfg.SessionMetaPath);
-                log.Write("info", "session_started",
-                    new { pid = meta.Pid, hwnd = meta.Hwnd, workbook = meta.WorkbookFullName });
-                return new EnsureResult(app, meta, "started");
+                meta.Save(metaPath);
+                appOut = app;
+                return meta;
             }
             catch
             {
@@ -146,9 +183,10 @@ public static class SessionService
     }
 
     /// <summary>부작용 없이 상태 판정. Active면 attach된 Application을 함께 반환.</summary>
-    public static SessionInfo Inspect(ProjectConfig cfg)
+    /// <param name="metaPath">생략 시 session.json. 일회용 인스턴스는 자기 메타 파일을 준다.</param>
+    public static SessionInfo Inspect(ProjectConfig cfg, string? metaPath = null)
     {
-        var meta = SessionMeta.Load(cfg.SessionMetaPath);
+        var meta = SessionMeta.Load(metaPath ?? cfg.SessionMetaPath);
         if (meta == null)
             return new SessionInfo { State = SessionState.None };
         if (meta.Poisoned)
@@ -173,10 +211,10 @@ public static class SessionService
 
     /// <summary>Active 세션 필수 명령(pull/push/test)의 공통 전제. lastCommand 기록.</summary>
     public static (dynamic App, SessionMeta Meta) AcquireOrThrow(ProjectConfig cfg, string command,
-        ToolLog? log = null)
+        ToolLog? log = null, string? metaPath = null)
     {
         RecoveryGate.Enforce(cfg, log);
-        var info = Inspect(cfg);
+        var info = Inspect(cfg, metaPath);
         switch (info.State)
         {
             case SessionState.None:
@@ -191,7 +229,7 @@ public static class SessionService
 
         var meta = info.Meta!;
         meta.LastCommand = command;
-        meta.Save(cfg.SessionMetaPath);
+        meta.Save(meta.FilePath);
         return (info.App!, meta);
     }
 
@@ -265,7 +303,7 @@ public static class SessionService
                      || (hr.HasValue && ComRetry.IsPoison(hr.Value));
         if (!fatal || meta == null) return false;
 
-        meta.MarkPoisoned(cfg.SessionMetaPath, $"{meta.LastCommand}: {ex.Message}", hr);
+        meta.MarkPoisoned($"{meta.LastCommand}: {ex.Message}", hr);
         log.Write("error", "session_poisoned", new { reason = ex.Message, hResult = hr });
         return true;
     }

@@ -38,7 +38,25 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
   실패하면 한 줄 에러와 `hint`(다음 행동)를 준다.
 - `_dbg\` 파일: `session.json`(세션 메타), `recovery.json`(격리 마커), `sync.json`(지문 캐시),
   `lease.json`, `vbaloop.jsonl`(append-only 도구 로그), `backups\`.
-- 세션이 필요한 명령(push/pull/test/run)은 진입 시 세션을 스스로 확보한다(auto-ensure).
+- 세션이 필요한 명령(push/pull/test/run/diff)은 진입 시 Excel을 스스로 확보한다. 방식은 세션 모드가 정한다(아래).
+
+### 세션 모드 (`[excel] session`)
+- **ephemeral(기본)**: 명령마다 숨은 Excel을 띄워 정본을 열고, 명령이 끝나면 저장 없이 닫는다. push만
+  쓰기로 열고 스스로 저장한다. pull/diff/test/run은 `ReadOnly:=True`로 연다 — 사용자가 정본을 열어 둔
+  상태에서도 동작하고, 테스트가 바꾼 시트·상태는 다음 실행에 남지 않는다.
+  - 근거: 에이전트 루프의 병목은 LLM 한 턴(수십 초)이고, 콜드 스타트는 명령당 약 1~1.5초다(실측). 반면 세션 Excel을
+    명령 사이에 유지하면 stale·poison·busy·격리·lease 같은 상태 관리가 전부 그 결정에서 나온다. 일회용
+    인스턴스는 도구 소유라 비정상 상태의 정리도 §11 규칙만 따르면 된다.
+  - 살아 있는 명시 세션(`session start`·`attach`, `session.json`)이 있으면 그것을 쓴다. 정리는 `session stop`.
+  - 메타는 `session.json`이 아니라 `_dbg\ephemeral\<id>.json`에 둔다. 자식 러너는 `--session-meta`로 받은 그 파일로
+    재attach하고, poison 기록도 같은 파일로 간다.
+  - 정상 종료: 정본을 저장 없이 닫는다 → 남은 워크북이 0개면 Quit → 300ms 안에 끝나지 않으면 신원 대조 후 kill.
+    Quit한 Excel은 명령이 RCW를 쥐고 있는 동안 종료되지 않아(실측) dist 임시 Excel과 같은 처분을 쓴다. 남은
+    워크북이 있으면(사용자가 숨은 인스턴스로 파일을 연 경우) kill하지 않고 창을 보이게 해 넘겨준다.
+  - 비정상(poison·타임아웃·Quit 실패)은 §11.1의 1번 규칙(`RecoveryGate.Resolve`)으로 정리하거나 격리한다.
+  - 하드 kill 등으로 정리되지 못한 메타는 다음 세션 명령이 mutex 안에서 sweep해 같은 규칙으로 정리한다.
+    `doctor --kill-orphans`는 이 프로젝트의 살아 있는 일회용 인스턴스를 고아 후보에서 뺀다.
+- **persistent**: 구 동작. auto-ensure가 세션을 채택하거나 새로 띄우고(`visible` 적용), 명령 사이에 유지한다.
 
 ### doctor / status / diff
 - `doctor`: Excel·COM·AccessVBOM·oleacc·비트니스·격리·고아 Excel·워크북 잠금 점검. `--fix`는 AccessVBOM을
@@ -46,9 +64,13 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
 - `status`: 세션 상태(none/active/poisoned/stale/busy/quarantined), src와 마지막 push의 동기화 여부.
 - `diff`: 워크북 vs src 읽기 전용 비교. 모듈별 same/changed/casingOnly/onlyInWorkbook/onlyInSrc와
   첫 차이 행을 보고한다. `--module`은 워크북 쪽 본문을 덤프한다. 차이가 있어도 exit 0이다(`payload.clean`).
+  ephemeral 모드는 읽기 전용 일회용 인스턴스로, persistent 모드는 살아 있는 세션에서만 동작한다(진단이 세션
+  Excel을 띄우는 것 자체가 부작용이라 auto-ensure하지 않는다).
+- `status`: `payload.mode`(ephemeral/persistent)를 함께 보고한다. ephemeral 모드의 세션 none은 정상이다.
 
 ### session
-- `start`: 살아 있는 세션은 채택하고, 없으면 새 Excel을 띄운다. 이벤트·링크 갱신·보안 대화상자를 끈 채로
+- `start`: 살아 있는 세션은 채택하고, 없으면 새 Excel을 띄운다. ephemeral 모드에서도 유지 세션을 만든다 —
+  `session stop` 전까지 세션 명령은 이 Excel을 쓴다. 이벤트·링크 갱신·보안 대화상자를 끈 채로
   워크북을 연다. read-only로 열리면(다른 프로세스가 잠금) 거부한다.
 - `attach`: 사용자가 이미 연 정본 워크북을 채택한다(§11.6).
 - `stop`: 저장 후 닫는다. 도구가 열지 않은 워크북이 있으면 Excel을 종료하지 않는다. `--no-save`,
@@ -61,26 +83,34 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
 - 워크북에 없는 src 파일은 지우지 않고 경고만 한다.
 
 ### push
-0. 지문 캐시: src가 마지막 push와 같으면 아무것도 하지 않는다(`--force`로 무시).
+0. 지문 캐시: src가 마지막 push와 같으면 아무것도 하지 않는다(`--force`로 무시). Excel 확보 전에 판정한다.
 1. **백업**: 첫 변경 직전에 `SaveCopyAs`로 `_dbg\backups\<UTC id>-push\`에 사본과 `metadata.json`을 남긴다.
    `[backup] keep`(기본 10, 0은 비활성)개를 보존한다.
 2. 파일 검사: BOM 제거, ACP 가드, 헤더 제거.
 3. 모듈별 스냅샷 후 in-place 교체. 신규 모듈은 생성, 워크북에만 있는 모듈은 `--prune`일 때만 제거한다.
    문서 모듈(Sheet/ThisWorkbook)은 교체만 가능하다.
 4. 무결성 검사: 예상하지 못한 컴포넌트 이름(`<이름>1` 등)이나 빈 모듈이 생기면 실패한다.
-5. 저장. 저장하지 않은 성공은 보고하지 않는다.
+5. **컴파일 게이트**: 저장 전에 VBE 컴파일(§9.8과 같은 `VbeCompile`)을 실행한다. 컴파일 오류·검증 불가면 저장하지
+   않고 실패한다(exit 2, `payload.compile`에 모달 본문). 컴파일되지 않는 코드는 디스크 정본에 들어가지 않는다.
+   - 일회용 인스턴스에서만 돈다. 모달 해제는 VBE를 닫고(Excel 종료 가능), 타임아웃은 kill로 끊기 때문이다.
+     유지 세션(persistent·`session start`·`attach`)에서는 생략하고 사유를 `payload.compile.detail`에 남긴다.
+     그 세션들의 컴파일 오류는 test가 모달 본문으로 보고한다.
+   - 탈출구: `push --skip-compile`(1회), `[push] compile = false`(프로젝트). 이번 변경과 무관한 기존 컴파일 오류가
+     있는 레거시 워크북용이다.
+6. 저장. 저장하지 않은 성공은 보고하지 않는다.
 
 실패하면 이번 push가 건드린 모듈을 전부 되돌리고 검증한다. 되돌릴 수 없으면(폼 재Import, prune,
-무결성 실패, 원복 실패) 세션을 poison하고 저장하지 않는다. 디스크의 정본은 항상 push 이전 상태로 남는다.
-`payload.recovery`에 결과를 담는다.
+무결성 실패, 원복 실패) 세션을 poison하고 저장하지 않는다. 일회용 인스턴스는 되돌리지 않고 저장 없이 버린다
+(`workbookState = discarded`). 어느 경우든 디스크의 정본은 push 이전 상태로 남는다. `payload.recovery`에 결과를 담는다.
 
 ### rollback
-`--list` / `--latest` / `--backup <id>`. 파일 작업만 한다. 세션 Excel이 살아 있으면 거부한다(exit 3).
+`--list` / `--latest` / `--backup <id>`. 파일 작업만 한다. 유지 세션 Excel이 살아 있으면 거부한다(exit 3).
 현재 파일을 `pre-rollback` 백업으로 남긴 뒤 원자적으로 교체하고 해시를 대조한다. 이후 push는 전량 재주입하고,
 pull은 `--force`를 요구한다.
 
 ### test / run
-- `test`: 표준 모듈의 인자 없는 `Test_*` Sub를 모듈 한정으로 실행한다.
+- `test`: 표준 모듈의 인자 없는 `Test_*` Sub를 모듈 한정으로 실행한다. ephemeral 모드는 정본을 읽기 전용
+  일회용 인스턴스로 열어 실행하므로 테스트가 바꾼 시트는 저장되지 않는다(테스트 안의 `Save`는 지원하지 않는다).
 - 실행은 **자식 러너 프로세스**가 맡는다. `Application.Run`은 블로킹 호출이라 같은 프로세스에서는 시간 제한을
   걸 수 없기 때문이다. 부모가 벽시계 타임아웃(`--timeout`, 기본 120초)을 감시한다.
 - 판정: 런타임 오류 없이 반환 AND 해당 구간의 LogShim `ok:false` 레코드 0건이면 pass.
@@ -119,10 +149,14 @@ name = "MyProject"            # 생략 시 워크북 이름
 
 [excel]
 workbook = "MyProject.xlsm"   # 루트 기준 상대 경로(필수)
-visible = true
+visible = true                # persistent 세션 Excel 표시 여부(일회용 인스턴스는 항상 숨김)
+session = "ephemeral"         # ephemeral(기본) | persistent
 
 [src]
 root = "src"
+
+[push]                        # 선택
+compile = true                # 저장 전 컴파일 게이트(일회용 인스턴스에서만)
 
 [dist]                        # 선택
 version = "1.2.0"
@@ -159,6 +193,9 @@ cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프�
 5. 폼 왕복과 코드비하인드의 한글 주석이 보존된다
 6. 세션 수명주기(멱등 start, stale·poison 판정)
 7. test의 런타임·컴파일 오류 대화상자 처리와 타임아웃 격리
+8. 일회용 모드: 명령 후 EXCEL 프로세스·메타 잔존 0, 타임아웃 후 정리, 하드 kill 잔재의 다음 명령 sweep,
+   명시 세션 채택, persistent 회귀
+9. push 컴파일 게이트: 컴파일 오류면 저장 안 함(디스크 무변경), `--skip-compile` 통과, 정상 코드 `compiled`
 
 ## 8. 부가 기능
 
@@ -243,11 +280,13 @@ cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프�
 사용자가 세션 Excel에서 다른 작업을 할 수 있으므로, 도구는 사용자 작업을 잃을 수 있는 kill을 하지 않는다.
 
 ### 11.1 kill 규칙
-Excel을 종료하는 경로는 셋뿐이다.
-1. 자동 정리(타임아웃·poison·stale): 도구가 띄운 세션 + PID·시작 시각 일치 + 세션 워크북 외에 열린
-   워크북이 없음을 확인한 경우.
+Excel을 종료하는 경로는 넷뿐이다.
+1. 자동 정리(타임아웃·poison·stale, 일회용 잔재 sweep): 도구가 띄운 세션 + PID·시작 시각 일치 + 세션 워크북 외에
+   열린 워크북이 없음을 확인한 경우.
 2. `session stop --discard`(명시): 도구가 띄운 세션 + 신원 일치 + 다른 워크북이 보이지 않는 경우.
 3. `doctor --kill-orphans`(명시): §11.5의 고아.
+4. 일회용 인스턴스의 정상 종료(§4 세션 모드): 이 명령이 띄운 인스턴스 + 정본을 닫은 뒤 열린 워크북 0개 확인 +
+   Quit 송신 + 신원 일치.
 
 그 밖의 경우는 모두 격리다.
 

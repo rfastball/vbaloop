@@ -141,7 +141,10 @@ public static class DoctorCommand
 
         // 6. 고아 Excel 후보: 창 없는 EXCEL.EXE. 기본은 리포트만 — --kill-orphans는 사용자 승인이고,
         //    그때도 OrphanFilter(현재 Windows 세션 + /automation + 비격리)를 통과한 것만 kill한다.
-        var orphans = ScanOrphanExcel(opts, meta, marker);
+        //    이 프로젝트의 일회용 인스턴스(_dbg\ephemeral)는 실행 중인 명령의 숨은 Excel일 수 있어 제외한다 —
+        //    끝난 명령의 잔재는 다음 세션 명령의 sweep이 격리 규칙으로 정리한다.
+        var ephemeralPids = LiveEphemeralPids(cfg);
+        var orphans = ScanOrphanExcel(opts, meta, marker, ephemeralPids);
         int killable = orphans.Count(z => z.Killable);
         checks.Add(new Check("excel.orphans", true,
             orphans.Count == 0
@@ -226,7 +229,18 @@ public static class DoctorCommand
     /// OrphanFilter로 판정하고, kill은 --kill-orphans AND Killable일 때만. 실패해도 doctor는 계속.
     /// 도구가 띄운 PID(ExcelPidRegistry)를 앞에 정렬한다.
     /// </summary>
-    private static List<Orphan> ScanOrphanExcel(CliArgs opts, SessionMeta? meta, RecoveryMarker? marker)
+    private static HashSet<int> LiveEphemeralPids(ProjectConfig? cfg)
+    {
+        var pids = new HashSet<int>();
+        if (cfg == null || !Directory.Exists(cfg.EphemeralDir)) return pids;
+        foreach (var file in Directory.EnumerateFiles(cfg.EphemeralDir, "*.json"))
+            if (SessionMeta.Load(file) is { } m && ProcessIdentity.IsAlive(m.Pid, m.ExcelStartTime))
+                pids.Add(m.Pid);
+        return pids;
+    }
+
+    private static List<Orphan> ScanOrphanExcel(CliArgs opts, SessionMeta? meta, RecoveryMarker? marker,
+        HashSet<int> ephemeralPids)
     {
         var result = new List<Orphan>();
         var registry = ExcelPidRegistry.Load(ExcelPidRegistry.DefaultPath);
@@ -241,6 +255,7 @@ public static class DoctorCommand
                 if (proc.MainWindowHandle != IntPtr.Zero) continue; // 창 있는 Excel은 사람/세션 소유로 간주
                 if (meta != null && proc.Id == meta.Pid
                     && ProcessIdentity.IsAlive(meta.Pid, meta.ExcelStartTime)) continue; // 현재 세션 제외
+                if (ephemeralPids.Contains(proc.Id)) continue; // 이 프로젝트의 일회용 인스턴스 제외
 
                 string? started = ProcessIdentity.GetStartTimeIso(proc.Id);
                 bool quarantined = (marker != null && (marker.Corrupt || marker.Pid == proc.Id))

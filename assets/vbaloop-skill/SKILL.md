@@ -24,8 +24,9 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 | test: fail 1건 + skipped 다수 | 첫 fail의 `detail`(모달 본문)만 진짜 신호 -> §test 타임아웃/모달 |
 | 고쳤는데 같은 오류, push가 계속 `cached:true` | `push --force`로 지문 캐시 우회 -> §push 거부 |
 | push 거부 (CP949·모듈 불일치·문서모듈) | §push 거부 |
+| push 실패 + `payload.compile.result: compile_error` | 모달 본문 보고 수정 후 재push -> §push 컴파일 게이트 |
 | push 중단 + `payload.recovery` | §push 실패 후 워크북 상태 |
-| 워크북을 push 이전으로 되돌리고 싶다 | `session stop` 후 `rollback --latest` -> §백업과 rollback |
+| 워크북을 push 이전으로 되돌리고 싶다 | (유지 세션이 있으면 `session stop` 후) `rollback --latest` -> §백업과 rollback |
 | pull 차단 (미동기 src 편집) | 기본 `push` 먼저, 워크북이 진실이면 `pull --force` -> §pull 주의 |
 | lease 충돌 (다른 에이전트 보유) | 재시도/자동회수 대기 -> §lease 충돌 |
 | dist 미동기·dangling·부트스트랩 타임아웃 | `references\dist.md` |
@@ -51,11 +52,16 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 4. `vbaloop test --json` - payload.tests[].detail에 실패 어서션(expected/actual)이 인라인됨
 5. fail이면 detail로 원인 파악 후 2로. green(payload.summary.fail == 0 그리고
    payload.summary.skipped == 0)이면 git commit
-6. `vbaloop session stop --json` - 저장 후 종료. 변경을 버릴 땐 `--no-save`
+6. 유지 세션을 썼다면 `vbaloop session stop --json` - 저장 후 종료. 변경을 버릴 땐 `--no-save`
 
-세션은 자동 확보된다(auto-ensure): push/pull/test/run이 세션 없음/stale/오염을 만나면
-스스로 정리 후 기동하고, 새로 띄운 경우 봉투 `session: {action:"started", pid}`로 알린다.
-`vbaloop session start`를 따로 부를 필요 없음(멱등이라 불러도 무해 - 진단/수동용).
+Excel은 명령이 스스로 확보한다. 방식은 `vbaloop.toml`의 `[excel] session`이 정한다:
+
+- `ephemeral`(기본): 세션 명령(push/pull/test/run/diff)마다 숨은 Excel을 띄우고 끝나면 닫는다
+  (봉투 `session: {action:"ephemeral", pid, readOnly}`). push만 쓰기로 열어 저장하고, 나머지는 읽기 전용이다 -
+  테스트가 바꾼 시트는 남지 않고, 사용자가 정본을 열어 둬도 test/diff는 동작한다. `session stop`은 필요 없다
+- `session start`/`session attach`로 연 세션이 살아 있으면 모드와 무관하게 그것을 쓴다(빠른 반복용, 끝나면 `session stop`)
+- `persistent`: 구 동작. 세션 없음/stale/오염을 만나면 스스로 정리 후 기동해 명령 사이에 유지한다
+  (봉투 `session: {action:"started", pid}`)
 
 테스트는 `Public Sub Test_*()`(인자 없음)만 수집된다. 단언은 `LogShim.AssertEq`.
 
@@ -99,8 +105,8 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 
 ### 사용자 Excel attach
 
-- 사용자가 정본을 이미 자기 Excel에서 열어두면 auto-ensure는 read-only로 거부하고
-  hint로 `vbaloop session attach`를 제시한다
+- 사용자가 정본을 이미 자기 Excel에서 열어두면 push(쓰기)는 read-only로 거부하고
+  hint로 `vbaloop session attach`를 제시한다(일회용 모드의 test/pull/diff는 읽기 전용이라 그대로 동작)
 - attach는 사용자 Excel 안에서 push 저장과 test/run 매크로 실행을 하게 되므로 **사용자 확인 후**
   `vbaloop session attach --json`. 이후 루프(push/test)는 평소와 같다
 - `vbaloop session stop --json`은 분리만 한다(저장/닫기/종료 안 함 - push가 저장한 것만 남음)
@@ -122,8 +128,9 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 - **fail 1건 + skipped 다수 패턴이면 첫 fail의 detail(모달 본문)이 유일한 진짜 신호다** -
   skipped는 미실행일 뿐이니 원인 분석에 쓰지 말 것. 코드 수정 후 push + test로 재검증
   (세션은 자동 복구 안내를 따른다 - hint가 session start를 지시하면 그대로)
-- MsgBox/무한루프는 타임아웃으로 끊긴다(기본 120초, `--timeout <초>`) - 러너만 종료되고 Excel은
-  대개 격리된다(§세션 격리). 사용자에게 알리고 해제를 기다린다
+- MsgBox/무한루프는 타임아웃으로 끊긴다(기본 120초, `--timeout <초>`). 일회용 Excel은 세션 워크북만
+  열려 있으면 도구가 정리하고 다음 명령이 새로 띄운다(hint: 같은 명령 재실행). 유지 세션 Excel은 사용자 작업이
+  없음을 증명하지 못하면 격리된다(§세션 격리) - 사용자에게 알리고 해제를 기다린다
 - 테스트 코드에 MsgBox/InputBox를 넣지 말 것 - 헤드리스에서 행 유발
 
 ### push 거부
@@ -135,11 +142,24 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
   `vbaloop push --force --json`으로 지문 캐시를 우회해 전량 재주입한다
   (`_dbg\sync.json` 수동 삭제는 불필요). 실물 확인은 `vbaloop diff --json`
 
+### push 컴파일 게이트
+
+- 일회용 모드의 push는 주입 후 저장 전에 VBE 컴파일을 돌린다. 컴파일 오류면 **저장하지 않고** exit 2,
+  `payload.compile = {result: "compile_error", detail: <모달 본문>}`. 디스크 정본은 push 이전 상태
+- detail(예: "변수가 정의되지 않았습니다")로 원인을 고치고 다시 push. 오류 위치는 모달에 없으니 이번에 바꾼
+  모듈부터 본다. `references\vba-pitfalls.md`도 확인
+- 이번 변경과 무관한 기존 컴파일 오류(레거시 워크북)로 막히면 **사용자 확인 후** `push --skip-compile`,
+  상시 끄려면 사용자가 `[push] compile = false`를 정한다 - 에이전트가 게이트를 우회하려고 스스로 끄지 말 것
+- `result: "check_failed"`(검증 불가)는 환경 문제다 - `doctor --json` 후 재시도
+- 유지 세션(persistent 모드, session start/attach)에서는 게이트가 생략된다(`result: "skipped"` + 사유).
+  그때 컴파일 오류는 test의 fail detail(모달 본문)로 드러난다
+
 ### push 실패 후 워크북 상태
 
 push는 실패하면 저장하지 않는다 - **디스크 정본은 항상 push 이전 상태**다. 메모리 워크북 상태는
 `payload.recovery.workbookState`(그리고 에러 문구)가 말한다:
 
+- `discarded`: 일회용 Excel을 저장 없이 버렸다. 원인 고치고 재시도
 - `untouched`: 아무것도 안 바뀜. 원인 고치고 재시도
 - `restored`: 이번 push가 건드린 모듈 전부 스냅샷으로 되돌리고 검증함. 원인 고치고 재시도
 - `poisoned`: 되돌릴 수 없었음(폼 재Import·prune·무결성 실패·원복 실패). 세션은 버려지고 다음 명령이
@@ -151,7 +171,7 @@ push는 실패하면 저장하지 않는다 - **디스크 정본은 항상 push 
 - push는 주입 직전에 워크북 사본을 `_dbg\backups\<id>-push\`에 남긴다(no-op push는 생략,
   최신 10개 보존, toml `[backup] keep = N`, 0이면 비활성)
 - 목록: `vbaloop rollback --list --json`. 복원: `vbaloop rollback --latest --json` 또는 `--backup <id>`
-- **세션이 살아 있으면 exit 3** - `vbaloop session stop`(실패 직후면 `--no-save`) 먼저
+- **유지 세션이 살아 있으면 exit 3** - `vbaloop session stop`(실패 직후면 `--no-save`) 먼저. 일회용 모드는 바로 된다
 - 복원 직전 현재 파일을 `pre-rollback` 백업으로 남긴다 - 바로 다음 `rollback --latest`가 되돌리기다
 - 복원 후 src는 워크북과 다를 수 있다. **다음 push는 src를 전량 재주입해 복원을 덮어쓴다.**
   복원된 워크북을 src로 채택하려면 `vbaloop pull --force`(plain pull은 일부러 막혀 있다), 비교는 `vbaloop diff`
@@ -218,8 +238,8 @@ base로 복사해 임시 Excel(창 없음)에서 모듈제외·버전스탬프·
   (same/changed/onlyInWorkbook/onlyInSrc/skipped)와 첫 차이 행(firstDiffLine)을 payload로 보고.
   워크북에 실제로 뭐가 들어있는지 확인할 때는 항상 이것 - 세션 Excel에 PowerShell 등으로
   직접 COM 접근은 금지. `--module <이름>`이면 해당 모듈의 워크북 쪽 본문 전체를
-  payload.module.workbookBody로 덤프. 활성 세션 필요(attach 전용, 자동 기동 없음 - 없으면
-  exit 3). 폼은 코드비하인드만 비교(레이아웃/.frx 제외). 차이가 있어도 exit 0 -
+  payload.module.workbookBody로 덤프. 일회용 모드는 읽기 전용 일회용 Excel로, persistent 모드는
+  활성 세션에서만 동작(자동 기동 없음 - 없으면 exit 3). 폼은 코드비하인드만 비교(레이아웃/.frx 제외). 차이가 있어도 exit 0 -
   payload.clean으로 판독
 - `vbaloop lint --json` - 규약/인코딩/헤더 전수 검사(Excel 불필요). push 전 일괄 사전 점검
 - `vbaloop run <Module.Proc> --json` - 임의 매크로 단건 실행. 반환값(원시 타입)/구간 로그 노출.

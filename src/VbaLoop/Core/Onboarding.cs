@@ -223,6 +223,7 @@ public static class Onboarding
             "[excel]",
             $"workbook = \"{workbookFileName}\"",
             "visible = true",
+            "session = \"ephemeral\"",
             "",
             "[src]",
             "root = \"src\"",

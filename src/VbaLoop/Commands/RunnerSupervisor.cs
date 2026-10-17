@@ -18,14 +18,27 @@ internal static class RunnerSupervisor
         bool SessionDiedAfterModal = false,
         RecoveryGate.Resolution? Recovery = null, RecoveryMarker? Marker = null, string? RecoveryWhy = null)
     {
-        /// <summary>세션 관련 후속 안내 — 격리됐으면 해제 안내, 아니면 session start.</summary>
-        public string SessionHint => Marker != null ? RecoveryGate.HintFor(Marker) : "session start";
+        /// <summary>일회용 인스턴스에서 실행했음 — 세션 재기동이 필요 없다(다음 명령이 새로 띄운다).</summary>
+        public bool Ephemeral { get; init; }
+
+        /// <summary>세션 관련 후속 안내 — 격리됐으면 해제 안내, 아니면 session start(일회용이면 재실행).</summary>
+        public string SessionHint => Marker != null ? RecoveryGate.HintFor(Marker)
+            : Ephemeral ? "같은 명령 재실행(일회용 Excel은 명령마다 새로 뜬다)" : "session start";
+
+        /// <summary>세션 사망 뒤 할 일을 사람용 문장 꼬리로.</summary>
+        public string RestartNote => Ephemeral ? "재실행하면 새 일회용 Excel로 진행" : "session start 필요";
 
         /// <summary>타임아웃/poison 메시지 꼬리 — kill 여부를 명시.</summary>
         public string RecoveryTail => Recovery is { } r ? RecoveryGate.Explain(r, Marker, RecoveryWhy ?? "") : "";
     }
 
     public static Result Run(
+        ProjectConfig cfg, SessionMeta meta, ToolLog log,
+        string commandName, string runId, int timeoutSec,
+        IEnumerable<string> extraRunnerArgs)
+        => RunCore(cfg, meta, log, commandName, runId, timeoutSec, extraRunnerArgs) with { Ephemeral = meta.Ephemeral };
+
+    private static Result RunCore(
         ProjectConfig cfg, SessionMeta meta, ToolLog log,
         string commandName, string runId, int timeoutSec,
         IEnumerable<string> extraRunnerArgs)
@@ -48,6 +61,8 @@ internal static class RunnerSupervisor
         psi.ArgumentList.Add(toml);
         psi.ArgumentList.Add("--runid");
         psi.ArgumentList.Add(runId);
+        psi.ArgumentList.Add("--session-meta"); // session.json 또는 일회용 인스턴스 메타
+        psi.ArgumentList.Add(meta.FilePath);
         foreach (var a in extraRunnerArgs)
             psi.ArgumentList.Add(a);
 
@@ -63,7 +78,7 @@ internal static class RunnerSupervisor
             // Excel은 사용자 작업이 없다고 증명될 때만 정리하고 아니면 격리(설계 §11, 자동 kill 폐지).
             try { proc.Kill(entireProcessTree: true); } catch { /* 이미 종료 */ }
             string reason = $"{commandName} 타임아웃({timeoutSec}s) — 워치독 관할 밖 모달/행 가능성";
-            meta.MarkPoisoned(cfg.SessionMetaPath, reason, null);
+            meta.MarkPoisoned(reason, null);
             log.Write("error", "runner_timeout", new { command = commandName, runId, timeoutSec });
             var (res, marker, why) = RecoveryGate.Resolve(cfg, meta, "timeout", reason, commandName, log);
             return new Result(true, -1, null, null, null, "", Recovery: res, Marker: marker, RecoveryWhy: why);
@@ -108,7 +123,7 @@ internal static class RunnerSupervisor
         {
             Thread.Sleep(800); // XLMAIN 소멸/프로세스 종료가 완료되도록
             // Poisoned는 사망이 아니라 poison 경로(exit 3) 소관 — 메타의 poison 마커 보존
-            var state = SessionService.Inspect(cfg).State;
+            var state = SessionService.Inspect(cfg, meta.FilePath).State;
             sessionDied = state is SessionState.Stale or SessionState.None;
         }
         RecoveryGate.Resolution? dres = null;
@@ -121,7 +136,7 @@ internal static class RunnerSupervisor
             // 창 없는 좀비는 격리 규칙의 Windowless로 정리되고, 다른 워크북이 보이면 격리(설계 §11).
             (dres, dmarker, dwhy) = RecoveryGate.Resolve(cfg, meta, "session_died",
                 "컴파일 오류 모달 해제(VBE 닫기) 후 세션 워크북 소실", commandName, log);
-            SessionMeta.Delete(cfg.SessionMetaPath);
+            SessionMeta.Delete(meta.FilePath);
             log.Write("warn", "session_died_after_modal",
                 new { note = "컴파일 오류 모달 해제(VBE 닫기)가 Excel 종료를 유발 — session start 필요", recovery = dres.ToString() });
         }
