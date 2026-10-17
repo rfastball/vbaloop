@@ -5,9 +5,12 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <AssemblyName>vbaloop</AssemblyName>
     <RootNamespace>VbaLoop</RootNamespace>
-    <!-- 로컬/개발 빌드 기본값. 릴리스는 태그에서 주입한다(-p:Version=1.2.3) —
-         InformationalVersion이 "<Version>+<git rev>"가 되어 vbaloop version이 둘 다 읽는다. -->
-    <Version>0.1.0</Version>
+    <!-- 릴리스는 태그에서 주입한다(-p:Version=1.2.3). 로컬/개발 빌드는 StampGitRevision이 마지막
+         v* 태그에서 유도한다(v0.3.0 + 5커밋 -> 0.3.0, 커밋 수/-dirty는 리비전에만). 0.1.0은 git·태그가
+         없을 때의 폴백. InformationalVersion이 "<Version>+<git rev>"가 되어 vbaloop version이 둘 다 읽는다.
+         -p:Version은 전역 속성이라 정적 평가 시점에 이미 보인다 — 여기서 명시 여부를 고정해 둔다. -->
+    <VbaLoopVersionFromCli Condition="'$(Version)' != ''">true</VbaLoopVersionFromCli>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -24,17 +27,31 @@
   </PropertyGroup>
 
   <!-- git describe를 SourceRevisionId로 주입 -> InformationalVersion "1.0.0+<rev>"
-       (vbaloop version이 판독). -dirty 접미 = 미커밋 소스 빌드. git 실패 시 nogit 폴백. -->
+       (vbaloop version이 판독). -dirty 접미 = 미커밋 소스 빌드. git 실패 시 nogit 폴백.
+       -p:Version이 없으면(로컬/CI 빌드) Version도 마지막 v* 태그에서 유도한다 — repo 빌드 exe가
+       0.1.0으로 비교돼 프로젝트 스탬프(vbaloop.toml [vbaloop] managed_by)에 거부되거나 스탬프를
+       끌어내리지 않게 한다(설계 §12). 태그가 semver가 아니면 폴백 유지.
+       GetAssemblyVersion이 Version에서 AssemblyVersion/FileVersion/InformationalVersion을 유도하므로
+       그 전에 돈다. -->
   <Target Name="StampGitRevision" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
-    <Exec Command="git describe --always --dirty" ConsoleToMSBuild="true"
-          IgnoreExitCode="true" StandardOutputImportance="low"
+    <Exec Command="git describe --tags --match v* --always --dirty" ConsoleToMSBuild="true"
+          IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low"
           WorkingDirectory="$(MSBuildProjectDirectory)">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitRevision" />
       <Output TaskParameter="ExitCode" PropertyName="GitExitCode" />
     </Exec>
+    <Exec Command="git describe --tags --match v* --abbrev=0" ConsoleToMSBuild="true"
+          Condition="'$(VbaLoopVersionFromCli)' != 'true'"
+          IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low"
+          WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitVersionTag" />
+      <Output TaskParameter="ExitCode" PropertyName="GitTagExitCode" />
+    </Exec>
     <PropertyGroup>
       <GitRevision Condition="'$(GitExitCode)' != '0' Or '$(GitRevision)' == ''">nogit</GitRevision>
       <SourceRevisionId>$(GitRevision)</SourceRevisionId>
+      <_GitTagVersion Condition="'$(GitTagExitCode)' == '0'">$([System.Text.RegularExpressions.Regex]::Replace('$(GitVersionTag)', '^v', ''))</_GitTagVersion>
+      <Version Condition="'$(VbaLoopVersionFromCli)' != 'true' And '$(_GitTagVersion)' != '' And $([System.Text.RegularExpressions.Regex]::IsMatch('$(_GitTagVersion)', '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$'))">$(_GitTagVersion)</Version>
     </PropertyGroup>
   </Target>
 
