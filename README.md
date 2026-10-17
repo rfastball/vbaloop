@@ -1,21 +1,36 @@
 # vbaloop
 
+> **코드 에이전트에게 (For coding agents):** 사용자가 이 레포 주소와 함께 VBA·Excel 프로젝트의 설치나 세팅을
+> 요청했다면 [AGENT_SETUP.md](AGENT_SETUP.md) 절차를 그대로 따른다. If a user gave you this repository to set up a
+> VBA/Excel project, follow [AGENT_SETUP.md](AGENT_SETUP.md).
+
 Excel VBA 프로젝트를 코드 에이전트가 다루게 해 주는 CLI.
 src의 `.bas`/`.cls`/`.frm` 파일과 워크북 VBProject를 손상 없이 왕복시키고(push/pull),
 `Test_*` 프로시저를 헤드리스로 실행해 결과를 JSON으로 돌려준다.
 Windows 단일 exe이며 애드인이 필요 없다. 구현 근거는 [DESIGN.md](DESIGN.md).
 
-## 가장 빠른 시작: 에이전트에게 맡기기
+## 한 번에 시작하기
 
-Claude Code나 Codex를 쓰고 있다면 설치부터 세팅까지 에이전트에게 맡길 수 있다. 워크북이 있는 폴더에서 에이전트를 열고
-이렇게 말한다.
+새 프로젝트든 기존 워크북이든, 아래 둘 중 하나면 된다.
 
-```text
-https://github.com/rfastball/vbaloop/blob/master/AGENT_SETUP.md 를 따라 이 워크북에 vbaloop를 세팅해줘
+**터미널에서 한 줄.** 기존 워크북이 있는 폴더, 또는 새 프로젝트로 쓸 빈 폴더에서 실행한다.
+
+```powershell
+irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex
 ```
 
-에이전트는 [AGENT_SETUP.md](AGENT_SETUP.md)대로 설치 → `setup --plan`으로 계획 확인 → 동의 요청 → 세팅 → 결과 보고를 한다.
-Excel 보안 설정(AccessVBOM)이나 PATH처럼 PC를 바꾸는 항목은 실행 전에 반드시 물어본다.
+설치가 끝나면 그 자리에서 setup이 이어진다. 폴더에 `.xlsm`이 있으면 "정산.xlsm을 가져올까요?"라고 묻고(원본은 그대로,
+옆에 사본 폴더를 만든다), 빈 폴더면 "여기에 새 프로젝트를 만들까요?"라고 묻는다. 마지막에 Claude Code를 그 폴더에서
+열어 준다.
+
+**에이전트에게 레포 주소 한 번.** 같은 폴더에서 Claude Code나 Codex를 열고 이렇게 말한다.
+
+```text
+https://github.com/rfastball/vbaloop 로 이 폴더에 vbaloop를 세팅해줘
+```
+
+에이전트는 [AGENT_SETUP.md](AGENT_SETUP.md)대로 설치 → 현재 폴더 판단 → `setup --plan`으로 계획 확인 → 동의 요청 →
+세팅 → 결과 보고를 한다. Excel 보안 설정(AccessVBOM)이나 PATH처럼 PC를 바꾸는 항목은 실행 전에 반드시 물어본다.
 
 ## 특징
 
@@ -47,10 +62,14 @@ irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex
 ```
 
 최신 릴리스를 받아 SHA-256을 확인하고 `%LOCALAPPDATA%\vbaloop\bin`에 설치한 뒤 사용자 PATH에 등록한다.
+사람이 쓰는 터미널이면 이어서 현재 폴더에서 `vbaloop setup`을 시작한다. 설치만 하려면 먼저
+`$env:VBALOOP_NO_SETUP=1`을 설정한다. 에이전트·CI 셸(입력이 없는 셸)에서는 묻지 않고 에이전트용 안내만 출력한다.
 또는 [릴리스](https://github.com/rfastball/vbaloop/releases/latest)에서 `vbaloop.exe`를 받아 더블클릭한다.
 서명되지 않은 exe라 SmartScreen 경고가 뜨면 `추가 정보` → `실행`을 누른다.
 
-## 시작하기
+## 시작하는 다른 방법
+
+이미 설치돼 있으면 워크북이 있는 폴더나 빈 폴더에서 `vbaloop setup`만 실행해도 위와 같이 현재 폴더부터 제안한다.
 
 **기존 워크북**: `.xlsm`을 `vbaloop.exe` 위로 끌어다 놓는다.
 원본은 그대로 두고, 원본 옆에 `<워크북이름>\` 폴더를 만들어 사본을 넣은 뒤 코드를 `src\`로 꺼낸다.

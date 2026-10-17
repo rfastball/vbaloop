@@ -152,8 +152,8 @@ public static class SetupCommand
         // 사용자가 빈 폴더를 만들어 워크북을 혼자 넣어 두는 준비 단계를 없앤다(원본은 불변).
         Say();
         Say("[4/6] 프로젝트 폴더");
-        var (workbookArg, newFolder) = givenNewFolder != null || givenWorkbook != null
-            ? (givenWorkbook, givenNewFolder)
+        var (workbookArg, newFolder, chosenFolder) = givenNewFolder != null || givenWorkbook != null
+            ? (givenWorkbook, givenNewFolder, (string?)null)
             : ChooseStart(opts, Say);
         string folder;
         string? intakeWorkbook = null;
@@ -161,8 +161,10 @@ public static class SetupCommand
         if (newFolder != null)
         {
             folder = newFolder;
+            Say(Directory.Exists(folder)
+                ? "  ok   빈 폴더를 새 프로젝트로 씁니다"
+                : "  ok   새 프로젝트 폴더를 만들었습니다");
             Directory.CreateDirectory(folder);
-            Say("  ok   새 프로젝트 폴더를 만들었습니다");
         }
         else if (workbookArg != null)
         {
@@ -182,7 +184,7 @@ public static class SetupCommand
         }
         else
         {
-            string? picked = ResolveFolder(opts, Say);
+            string? picked = chosenFolder ?? ResolveFolder(opts, Say);
             if (picked == null)
             {
                 o.Fail("프로젝트 폴더가 지정되지 않음",
@@ -370,22 +372,31 @@ public static class SetupCommand
 
     /// <summary>
     /// 대화형 시작점 선택(--workbook·--new·--folder가 모두 없을 때만). 반환은 (가져올 워크북, 새 프로젝트
-    /// 폴더) 중 하나, 둘 다 null이면 준비된 폴더 흐름(ResolveFolder)으로 간다.
+    /// 폴더, 기존 프로젝트 폴더) 중 하나, 모두 null이면 준비된 폴더 흐름(ResolveFolder)으로 간다.
     /// <list type="bullet">
+    /// <item>현재 폴더 우선(셸 실행만): 프로젝트면 다시 세팅, .xlsm이 있으면 그것, 비었으면 여기에 새 프로젝트</item>
     /// <item>기존 워크북: 파일 선택 대화상자, 취소하면 콘솔 경로 입력(창에 파일을 끌어다 놓으면 입력됨)</item>
     /// <item>새 프로젝트: 이름만 받는다. 부모는 더블클릭이면 %USERPROFILE%\vbaloop-projects, 셸이면 cwd</item>
     /// </list>
     /// </summary>
-    private static (string? Workbook, string? NewFolder) ChooseStart(CliArgs opts, Action<string> say)
+    private static (string? Workbook, string? NewFolder, string? Folder) ChooseStart(CliArgs opts, Action<string> say)
     {
-        if (opts.Folder != null || opts.Yes || opts.Json || !ConsoleHost.CanPrompt) return (null, null);
+        if (opts.Folder != null || opts.Yes || opts.Json || !ConsoleHost.CanPrompt) return (null, null, null);
+
+        // 셸에서 부른 경우(설치 스크립트가 이어서 부르는 경우 포함) 현재 폴더가 곧 의도다 — "워크북이 있는
+        // 폴더에서 한 줄 실행"만으로 시작되게 먼저 제안한다. 더블클릭은 cwd가 exe 위치라 건너뛴다.
+        if (!ConsoleHost.IsOwnConsole())
+        {
+            var fromCwd = OfferCurrentFolder(Environment.CurrentDirectory, say);
+            if (fromCwd.Workbook != null || fromCwd.NewFolder != null || fromCwd.Folder != null) return fromCwd;
+        }
 
         if (ConsoleHost.Confirm("  기존 워크북(.xlsm)을 가져올까요? (n = 새 빈 프로젝트)", defaultYes: true, fallback: false))
         {
             say("  파일 선택 대화상자를 엽니다 (원본은 그대로 두고 옆에 사본 폴더를 만듭니다)");
             string? picked = FilePicker.PickWorkbook("vbaloop로 가져올 워크북(.xlsm)을 고르세요")
                 ?? ConsoleHost.Ask("  워크북 경로 (이 창에 파일을 끌어다 놓아도 됨, 빈 줄 = 폴더 직접 선택):");
-            return (picked, null);
+            return (picked, null, null);
         }
 
         string parent = ConsoleHost.IsOwnConsole() ? NewProjectFolder.ExplorerDefaultParent : Environment.CurrentDirectory;
@@ -393,16 +404,61 @@ public static class SetupCommand
         while (true)
         {
             string? name = ConsoleHost.Ask("  프로젝트 이름 (빈 줄 = 준비된 폴더 직접 선택):");
-            if (name == null) return (null, null);
+            if (name == null) return (null, null, null);
             try
             {
-                return (null, NewProjectFolder.Resolve(parent, name));
+                return (null, NewProjectFolder.Resolve(parent, name), null);
             }
             catch (CliError e)
             {
                 say($"  FAIL {e.Message}" + (e.Hint != null ? $" — {e.Hint}" : ""));
             }
         }
+    }
+
+    /// <summary>현재 폴더 상태에 맞는 시작점을 하나 제안한다. 거절하거나 해당 없으면 전부 null.</summary>
+    private static (string? Workbook, string? NewFolder, string? Folder) OfferCurrentFolder(string cwd, Action<string> say)
+    {
+        var here = CwdStart.Inspect(cwd);
+        if (here.IsProject)
+        {
+            if (ConsoleHost.Confirm("  현재 폴더는 이미 vbaloop 프로젝트입니다. 다시 세팅할까요? (관리 파일 갱신 + 검증)",
+                    defaultYes: true, fallback: false))
+                return (null, null, cwd);
+        }
+        else if (here.Workbooks.Count == 1)
+        {
+            string name = here.Workbooks[0];
+            if (ConsoleHost.Confirm(
+                    $"  현재 폴더의 {name}을(를) 가져올까요? (옆에 {Path.GetFileNameWithoutExtension(name)}\\ 폴더를 만들어 사본으로 작업)",
+                    defaultYes: true, fallback: false))
+                return (Path.Combine(cwd, name), null, null);
+        }
+        else if (here.Workbooks.Count > 1)
+        {
+            say("  현재 폴더의 워크북:");
+            for (int i = 0; i < here.Workbooks.Count; i++) say($"    {i + 1}. {here.Workbooks[i]}");
+            while (true)
+            {
+                string? pick = ConsoleHost.Ask("  가져올 번호 (빈 줄 = 다른 방법):");
+                if (pick == null) break;
+                if (int.TryParse(pick, out int k) && k >= 1 && k <= here.Workbooks.Count)
+                    return (Path.Combine(cwd, here.Workbooks[k - 1]), null, null);
+                say("  FAIL 목록에 있는 번호를 입력하세요");
+            }
+        }
+        else if (here.IsEmpty)
+        {
+            // 폴더 이름이 곧 워크북 이름이 된다 — 드라이브 루트처럼 이름으로 못 쓰는 곳은 제안하지 않는다
+            string folderName = new DirectoryInfo(cwd).Name;
+            bool usable;
+            try { NewProjectFolder.ValidateName(folderName); usable = true; }
+            catch (CliError) { usable = false; }
+            if (usable && ConsoleHost.Confirm($"  현재 폴더({folderName})가 비어 있습니다. 여기에 새 프로젝트를 만들까요?",
+                    defaultYes: true, fallback: false))
+                return (null, cwd, null);
+        }
+        return default;
     }
 
     /// <summary>

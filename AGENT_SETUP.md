@@ -1,8 +1,10 @@
 # vbaloop 에이전트 설치 절차
 
-코드 에이전트(Claude Code, Codex 등)가 읽고 그대로 따르는 문서다. 사용자는 에이전트에게 이렇게 말하면 된다.
+코드 에이전트(Claude Code, Codex 등)가 읽고 그대로 따르는 문서다. 사용자는 에이전트에게 레포 주소만 줘도 된다.
 
-> https://github.com/rfastball/vbaloop/blob/master/AGENT_SETUP.md 를 따라 이 워크북에 vbaloop를 세팅해줘
+> https://github.com/rfastball/vbaloop 로 이 폴더에 vbaloop를 세팅해줘
+
+사용자가 워크북이나 프로젝트 이름을 따로 말하지 않았으면 1단계의 "현재 폴더로 판단"을 따른다.
 
 ## 원칙
 
@@ -23,7 +25,21 @@
 | 새로 시작 | `--new "<이름>"` | 이름, 그리고 만들 위치(이 명령을 실행하는 폴더 아래에 생긴다) |
 | 준비해 둔 폴더 | `--folder "<폴더>"` | 그 폴더의 `.xlsm`이 0개(새로 만듦) 또는 1개(채택)인지 |
 
-불분명하면 사용자에게 묻는다. 현재 폴더에 `.xlsm`이 하나뿐이면 그것을 후보로 제안해도 된다.
+### 사용자가 레포 주소만 줬을 때: 현재 폴더로 판단
+
+사용자가 대상을 말하지 않았으면 에이전트의 현재 작업 폴더를 보고 정한다. 판단은 후보일 뿐이고, 3~4단계의
+`--plan` 결과로 사용자에게 확인받기 전에는 아무것도 바꾸지 않는다.
+
+| 현재 폴더 | 후보 시작점 |
+|---|---|
+| `vbaloop.toml`이 있음 | 이미 vbaloop 프로젝트다. 세팅이 아니라 그 폴더의 `CLAUDE.md`/`AGENTS.md` 관리 블록대로 작업하면 된다고 알린다. 관리 파일 복구를 원하면 `--folder "<현재 폴더>"` |
+| `.xlsm`이 1개 | `--workbook "<현재 폴더>\<그 파일>"`. 옆에 `<이름>\` 사본 폴더가 생긴다 |
+| `.xlsm`이 여러 개 | 어느 것인지 사용자에게 묻는다. 고른 것으로 `--workbook` |
+| `.`로 시작하는 항목(`.git` 등) 말고 비어 있음 | 여기에 새 프로젝트: `--folder "<현재 폴더>"`. 워크북 이름은 폴더 이름이 된다 |
+| 그 외(다른 파일만 있음) | 사용자에게 묻는다. 새 프로젝트면 이름을 받아 `--new "<이름>"`(현재 폴더 아래 생성), 기존 워크북이면 경로를 받는다 |
+
+`~$`로 시작하는 `.xlsm`은 Excel 잠금 파일이라 제외한다. `.xlsx`만 있으면 매크로 워크북이 아니므로 `.xlsm`으로 다른 이름
+저장할지 사용자에게 묻는다.
 
 ## 2. vbaloop 확보
 
@@ -35,8 +51,11 @@ vbaloop version
 인터넷에서 설치 스크립트를 받아 실행하는 것이므로 사용자에게 알리고 진행한다.
 
 ```
-powershell -NoProfile -Command "irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex"
+powershell -NoProfile -NonInteractive -Command "irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex"
 ```
+
+사람의 터미널에서는 이 스크립트가 설치 후 대화형 setup으로 이어지지만, 에이전트 셸(입력 없음, `-NonInteractive`)에서는
+묻지 않고 설치만 한 뒤 에이전트용 안내(exe 절대 경로, 이 문서, `--plan` 사용법)를 출력한다.
 
 설치해도 **지금 에이전트가 쓰는 셸의 PATH는 바뀌지 않는다.** 이후 명령은 절대 경로
 `%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe`(PowerShell: `& "$env:LOCALAPPDATA\vbaloop\bin\vbaloop.exe"`)로 실행한다.
