@@ -43,6 +43,9 @@ public static class SetupCommand
             ? NewProjectFolder.Resolve(Environment.CurrentDirectory, opts.NewName)
             : null;
 
+        if (opts.Plan)
+            return PlanOnly(opts, givenWorkbook, givenNewFolder, o);
+
         Say(opts.InstallOnly ? "vbaloop setup --install-only — exe 설치/갱신" : "vbaloop setup — 개발환경 마법사");
         Say();
 
@@ -86,12 +89,20 @@ public static class SetupCommand
         {
             Say($"  FAIL {vbomDetail}");
             Say("       이 설정이 꺼져 있으면 vbaloop의 push/pull/test가 전부 실패합니다.");
-            bool agree = opts.Yes || ConsoleHost.Confirm("       지금 켤까요?", defaultYes: true, fallback: false);
+            // 보안 설정이라 동의는 두 가지로만 받는다: 사람이 프롬프트에 답하거나, 사용자 동의를 받은
+            // 에이전트가 --enable-vbom을 명시하거나. --yes(프롬프트 생략)는 이 동의를 대신하지 않는다.
+            bool canAsk = !opts.Yes && !opts.Json && ConsoleHost.CanPrompt;
+            bool agree = opts.EnableVbom
+                         || (canAsk && ConsoleHost.Confirm("       지금 켤까요?", defaultYes: true, fallback: false));
             if (!agree)
             {
                 o.Fail("AccessVBOM이 비활성 상태 — 설정 없이는 진행할 수 없음",
-                    "Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스' 체크 후 재실행",
+                    canAsk
+                        ? "Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스' 체크 후 재실행"
+                        : "보안 설정 변경이라 사용자 동의가 필요: 사용자에게 묻고 동의하면 같은 명령에 --enable-vbom을 붙여 재실행 "
+                          + "(또는 사용자가 Excel 옵션 > 보안 센터 > 매크로 설정에서 직접 체크)",
                     environment: true);
+                o.Payload = new { consentRequired = new[] { "accessVbom" }, approveFlag = "--enable-vbom", detail = vbomDetail };
                 return o;
             }
             var (changed, detail) = AccessVbom.Enable(curVer);
@@ -347,6 +358,7 @@ public static class SetupCommand
                 claudeCli,
                 claudeLaunched,
                 repo = RepoUrl,
+                next = BuildNext(folder, opts.NoInstall, verify != "skipped"),
             };
             return o;
         }
@@ -407,10 +419,115 @@ public static class SetupCommand
         return picked ?? ConsoleHost.Ask("  프로젝트 폴더 경로:");
     }
 
-    /// <summary>PATH에서 claude 실행 파일을 찾는다 — 안내 문구 분기·실행 제안용(실패해도 setup은 성공).</summary>
-    private static bool HasClaudeCli()
+    /// <summary>
+    /// setup --plan 본체: 환경을 읽기만 하고 SetupPlan으로 할 일·동의 항목·실행 명령을 보고한다.
+    /// 막는 요인(blocker)이 있으면 ok=false지만 payload는 그대로 채운다 — 에이전트가 무엇이 문제인지와
+    /// 나머지 계획을 한 번에 사용자에게 보여줄 수 있게.
+    /// </summary>
+    private static Outcome PlanOnly(CliArgs opts, string? workbook, string? newFolder, Outcome o)
     {
-        string[] names = { "claude.exe", "claude.cmd", "claude.bat" };
+        string? curVer;
+        using (var curVerKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(@"Excel.Application\CurVer"))
+            curVer = curVerKey?.GetValue(null) as string;
+        var (vbomOk, vbomDetail, _) = AccessVbom.Detect();
+        var probes = new SetupPlan.Probes(
+            ExcelOk: Type.GetTypeFromProgID("Excel.Application") != null,
+            ExcelVersion: curVer,
+            VbomOk: vbomOk,
+            VbomDetail: vbomDetail,
+            Installed: File.Exists(SelfInstall.InstalledExePath),
+            RunningInstalled: Environment.ProcessPath != null
+                              && PathDrift.SamePath(Environment.ProcessPath, SelfInstall.InstalledExePath),
+            OnUserPath: SelfInstall.IsOnUserPath());
+        var request = new SetupPlan.Request(workbook, newFolder, opts.Folder,
+            opts.InstallOnly, opts.NoInstall, opts.SkipVerify);
+        var plan = SetupPlan.Build(request, probes);
+
+        if (!plan.Ready)
+            foreach (var b in plan.Blockers)
+                o.Fail(b, plan.Hint, plan.EnvironmentBlocker);
+
+        o.Payload = new
+        {
+            plan = true,
+            ready = plan.Ready,
+            blockers = plan.Blockers,
+            environment = new
+            {
+                excel = probes.ExcelOk,
+                excelVersion = probes.ExcelVersion,
+                accessVbom = probes.VbomOk,
+                accessVbomDetail = probes.VbomDetail,
+            },
+            install = new
+            {
+                installDir = SelfInstall.InstallDir,
+                exe = SelfInstall.InstalledExePath,
+                installed = probes.Installed,
+                onUserPath = probes.OnUserPath,
+            },
+            project = plan.Project,
+            changes = plan.Changes,
+            consent = plan.Consents,
+            command = plan.Command,
+            agents = DetectAgents(),
+        };
+
+        if (!opts.Json)
+        {
+            o.HumanLines.Add("vbaloop setup --plan (아무것도 바꾸지 않음)");
+            o.HumanLines.Add("");
+            o.HumanLines.Add("할 일:");
+            foreach (var c in plan.Changes) o.HumanLines.Add($"  - {c}");
+            if (plan.Consents.Count > 0)
+            {
+                o.HumanLines.Add("");
+                o.HumanLines.Add("동의가 필요한 항목:");
+                foreach (var c in plan.Consents)
+                    o.HumanLines.Add($"  - [{c.Id}] {c.Reason}"
+                        + (c.ApproveFlag != null ? $" (동의 시 {c.ApproveFlag})" : "")
+                        + (c.DeclineFlag != null ? $" (거절 시 {c.DeclineFlag})" : ""));
+            }
+            o.HumanLines.Add("");
+            o.HumanLines.Add($"실행할 명령: {plan.Command}");
+        }
+        return o;
+    }
+
+    /// <summary>
+    /// 세팅을 마친 에이전트가 이어서 할 일(설계 §10.8). setup을 부른 에이전트 세션은 보통 다른 폴더에서
+    /// 돌고 있어 새 프로젝트의 CLAUDE.md/AGENTS.md·스킬이 로드돼 있지 않다 — 그 세션에서 이어갈지,
+    /// 프로젝트 폴더에서 새 세션을 열지 사용자가 고르게 둘 다 준다. 에이전트 셸의 PATH는 설치 전
+    /// 상태로 굳어 있으므로 exe는 절대 경로로 준다.
+    /// </summary>
+    private static object BuildNext(string folder, bool noInstall, bool sessionOpen)
+    {
+        string toml = Path.Combine(folder, "vbaloop.toml");
+        return new
+        {
+            folder,
+            exe = noInstall ? Environment.ProcessPath : SelfInstall.InstalledExePath,
+            agentDocs = new[] { Path.Combine(folder, "CLAUDE.md"), Path.Combine(folder, "AGENTS.md") },
+            continueHere = $"이 세션에서 이어가려면 {Path.Combine(folder, "CLAUDE.md")}(Codex는 AGENTS.md)의 vbaloop 블록과 "
+                           + $"{Path.Combine(folder, ".claude", "skills", "vbaloop", "SKILL.md")}를 읽고, "
+                           + $"이후 vbaloop 명령은 그 폴더에서 실행(또는 --config \"{toml}\")",
+            newSession = DetectAgents().Select(a => $"cd /d \"{folder}\" && {a}").ToArray(),
+            excelSession = sessionOpen
+                ? "검증용 도구 소유 Excel 세션이 열려 있음(정상) - 다음 명령이 재사용, 끝낼 때 vbaloop session stop"
+                : null,
+        };
+    }
+
+    /// <summary>PATH에서 찾은 코드 에이전트 CLI — 세팅 후 새 세션 안내(next)에 쓴다.</summary>
+    private static string[] DetectAgents()
+        => new[] { "claude", "codex" }.Where(OnPath).ToArray();
+
+    /// <summary>PATH에서 claude 실행 파일을 찾는다 — 안내 문구 분기·실행 제안용(실패해도 setup은 성공).</summary>
+    private static bool HasClaudeCli() => OnPath("claude");
+
+    private static bool OnPath(string baseName)
+    {
+        string[] names = { baseName + ".exe", baseName + ".cmd", baseName + ".bat" };
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
         {
             if (dir.Length == 0) continue;

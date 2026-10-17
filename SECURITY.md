@@ -14,10 +14,13 @@ Nothing here is done silently: `setup` asks first, and `doctor` only reports unl
 
 | Change | When | How to undo |
 |---|---|---|
-| **Trust access to the VBA project object model** (`AccessVBOM=1` under `HKCU\Software\Microsoft\Office\<ver>\Excel\Security`) | `vbaloop setup` after you agree, or `vbaloop doctor --fix` | Excel → Options → Trust Center → Macro Settings, or set the value back to `0` |
+| **Trust access to the VBA project object model** (`AccessVBOM=1` under `HKCU\Software\Microsoft\Office\<ver>\Excel\Security`) | `vbaloop setup` after you agree at its prompt, `setup --enable-vbom` (non-interactive; `--yes` alone never changes it), or `vbaloop doctor --fix` | Excel → Options → Trust Center → Macro Settings, or set the value back to `0` |
 | Copies `vbaloop.exe` to `%LOCALAPPDATA%\vbaloop\bin` and adds it to your **user** PATH | `vbaloop setup`, `setup --install-only`, `install.ps1` | Delete the folder and remove the PATH entry |
 | Per-user state in `%LOCALAPPDATA%\vbaloop\` (Excel PIDs it started or quarantined) | Any session command | Delete the folder |
 | Project files: `vbaloop.toml`, `src\LogShim.bas`, managed blocks in `CLAUDE.md`/`AGENTS.md`/`.gitignore`, `.claude\skills\vbaloop\`, and `_dbg\` (logs, session state, workbook backups) | `vbaloop init` / `setup`, and normal use | Delete them; content outside the managed markers is never touched |
+| A copy of your workbook in a new `<name>\` folder next to it (the original is never modified) | `setup --workbook`, or dropping a workbook on `vbaloop.exe` | Delete the folder |
+
+`vbaloop setup --plan` lists every change above that a given `setup` would make, without making any of them.
 
 Trusting VBA project access lets any macro or program running as you modify VBA projects. Enable it
 only on a machine where you develop VBA, and turn it off when you are done if that matters to you.

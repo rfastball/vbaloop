@@ -39,6 +39,11 @@ public sealed class CliArgs
     public string? Workbook { get; private set; }
     /// <summary>setup 전용: 새 빈 프로젝트 이름. cwd 아래 &lt;이름&gt;\ 폴더에 &lt;이름&gt;.xlsm과 샘플 테스트를 만든다.</summary>
     public string? NewName { get; private set; }
+    /// <summary>setup 전용: AccessVBOM(보안 설정)을 켜는 데 사용자가 동의했음. --yes는 이것을 포함하지 않는다 —
+    /// 에이전트가 프롬프트를 넘기려고 붙인 --yes로 보안 설정이 바뀌면 안 되기 때문(설계 §10.8).</summary>
+    public bool EnableVbom { get; private set; }
+    /// <summary>setup 전용: 아무것도 바꾸지 않고 할 일·필요한 동의·실행할 명령만 보고한다.</summary>
+    public bool Plan { get; private set; }
     /// <summary>setup/doctor 전용: 확인 프롬프트를 묻지 않고 승인으로 진행(비대화형 설치).</summary>
     public bool Yes { get; private set; }
     /// <summary>setup 전용: 마지막 push/test(또는 pull) 검증 단계를 건너뛴다 — Excel 불필요.</summary>
@@ -108,6 +113,8 @@ public sealed class CliArgs
                     break;
                 case "--yes" or "-y": r.Yes = true; break;
                 case "--skip-verify": r.SkipVerify = true; break;
+                case "--enable-vbom": r.EnableVbom = true; break;
+                case "--plan": r.Plan = true; break;
                 case "--no-install": r.NoInstall = true; break;
                 case "--install-only": r.InstallOnly = true; break;
                 case "--fix": r.Fix = true; break;
@@ -132,7 +139,7 @@ public sealed class CliArgs
                 default:
                     if (args[i].StartsWith('-'))
                         throw new CliError($"미지 옵션: {args[i]}",
-                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --workbook <경로> --new <이름> --strip-comments");
+                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --workbook <경로> --new <이름> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }

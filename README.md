@@ -5,6 +5,18 @@ src의 `.bas`/`.cls`/`.frm` 파일과 워크북 VBProject를 손상 없이 왕�
 `Test_*` 프로시저를 헤드리스로 실행해 결과를 JSON으로 돌려준다.
 Windows 단일 exe이며 애드인이 필요 없다. 구현 근거는 [DESIGN.md](DESIGN.md).
 
+## 가장 빠른 시작: 에이전트에게 맡기기
+
+Claude Code나 Codex를 쓰고 있다면 설치부터 세팅까지 에이전트에게 맡길 수 있다. 워크북이 있는 폴더에서 에이전트를 열고
+이렇게 말한다.
+
+```text
+https://github.com/rfastball/vbaloop/blob/master/AGENT_SETUP.md 를 따라 이 워크북에 vbaloop를 세팅해줘
+```
+
+에이전트는 [AGENT_SETUP.md](AGENT_SETUP.md)대로 설치 → `setup --plan`으로 계획 확인 → 동의 요청 → 세팅 → 결과 보고를 한다.
+Excel 보안 설정(AccessVBOM)이나 PATH처럼 PC를 바꾸는 항목은 실행 전에 반드시 물어본다.
+
 ## 특징
 
 - **손상 없는 왕복**: 코드는 `CodeModule.Lines`(메모리)로 주고받아 코드페이지 변환이 없다. 한글 등 시스템
@@ -59,13 +71,15 @@ vbaloop setup --folder C:\work\MyVba           # 준비해 둔 폴더(워크북 
 
 - 사본 폴더 이름이 이미 쓰이고 있으면 `<이름> (2)`처럼 비어 있는 이름을 쓴다. 다시 실행하면 이전에 만든 폴더를 재사용한다.
 - 사본을 둘 곳을 직접 정하려면 `--workbook <경로> --folder <폴더>`.
-- `--yes`를 붙이면 묻지 않고 진행한다(Claude Code 실행 제안도 생략).
+- `--yes`를 붙이면 묻지 않고 진행한다(Claude Code 실행 제안도 생략). 단 AccessVBOM을 켜는 것은 `--yes`에
+  포함되지 않는다. 꺼져 있으면 `--enable-vbom`을 따로 붙여야 한다.
+- `--plan`을 붙이면 아무것도 바꾸지 않고 할 일, 동의가 필요한 항목, 실행할 명령만 보여준다.
 
 ## 명령
 
 | 명령 | 설명 |
 |---|---|
-| `setup [--workbook <xlsm> \| --new <이름> \| --folder <경로>]` | 개발환경 마법사(유일한 대화형 명령) |
+| `setup [--workbook <xlsm> \| --new <이름> \| --folder <경로>] [--plan] [--enable-vbom]` | 개발환경 마법사(유일한 대화형 명령). `--plan`은 미리보기 |
 | `init [--check]` | 관리 파일 설치·갱신. `--check`는 검사만 |
 | `doctor [--fix] [--kill-orphans]` | 환경 점검. `--fix`는 AccessVBOM 켜기, `--kill-orphans`는 창 없는 자동화 Excel 정리(먼저 `doctor`로 대상 확인) |
 | `status` | 세션 상태와 src 동기화 여부 |

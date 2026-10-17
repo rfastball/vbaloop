@@ -156,7 +156,7 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--yes] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
         return o;
     }
 
@@ -170,7 +170,7 @@ internal static class Program
         새 프로젝트: vbaloop setup --new <이름>   (.\<이름>\ 에 워크북 + 샘플 테스트)
 
         사용법:
-          vbaloop setup   [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--yes] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --workbook은 기존 워크북 사본으로, --new는 .\<이름>\ 새 프로젝트로 시작, --install-only는 exe 설치만)
+          vbaloop setup   [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --workbook은 기존 워크북 사본으로, --new는 .\<이름>\ 새 프로젝트로 시작, --plan은 변경 없이 계획만, --enable-vbom은 AccessVBOM 변경 동의(--yes에 미포함), --install-only는 exe 설치만)
           vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 전 프로젝트 일괄)
           vbaloop doctor  [--json] [--kill-orphans] [--fix]  환경 점검 + 고아 Excel 리포트(kill/fix는 명시 시)
           vbaloop status  [--json]                 세션/프로젝트 상태

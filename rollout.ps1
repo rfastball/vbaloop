@@ -22,7 +22,8 @@ $exe = Join-Path $PSScriptRoot 'src\VbaLoop\bin\Release\net10.0-windows\win-x64\
 # 배포본 사용자는 rollout.ps1이 없으므로 setup이 같은 일을 해야 하고, 여기서 그걸 재사용한다.
 $shimDir = Join-Path $env:LOCALAPPDATA 'vbaloop\bin'
 Write-Host "== [3/4] PATH shim ($shimDir) ==" -ForegroundColor Cyan
-& $exe setup --install-only --yes
+# --yes는 AccessVBOM을 승인하지 않는다(설계 §10.8) — 롤아웃 실행 자체를 개발 PC 소유자의 동의로 본다
+& $exe setup --install-only --yes --enable-vbom
 if ($LASTEXITCODE -ne 0) {
     Write-Host "설치 실패 - 실행 중인 vbaloop 종료 후 재시도" -ForegroundColor Red
     exit 1

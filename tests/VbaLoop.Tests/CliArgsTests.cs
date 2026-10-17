@@ -145,6 +145,17 @@ public class CliArgsTests
         Assert.Equal("MyTool", CliArgs.Parse(new[] { "--new", "MyTool" }).NewName);
     }
 
+    [Fact]
+    public void Parse_EnableVbomAndPlan_AreSeparateFromYes()
+    {
+        var yesOnly = CliArgs.Parse(new[] { "--yes" });
+        Assert.False(yesOnly.EnableVbom); // --yes는 보안 설정 동의를 포함하지 않는다
+        var r = CliArgs.Parse(new[] { "--plan", "--enable-vbom" });
+        Assert.True(r.Plan);
+        Assert.True(r.EnableVbom);
+        Assert.False(r.Yes);
+    }
+
     [Theory]
     [InlineData("--workbook")]
     [InlineData("--new")]
