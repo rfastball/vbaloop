@@ -50,7 +50,7 @@ public class RepoLocatorTests
         t.File(System.IO.Path.Combine("SampleRpa", "vbaloop.toml"));
         t.File(System.IO.Path.Combine("한글 프로젝트", "vbaloop.toml"));
         Directory.CreateDirectory(System.IO.Path.Combine(t.Path, "docs")); // toml 없음 → 제외
-        t.File(System.IO.Path.Combine("_VbaHarness", "readme.txt"));       // toml 없음 → 제외
+        t.File(System.IO.Path.Combine("_tools", "readme.txt"));            // toml 없음 → 제외
 
         var repo = System.IO.Path.Combine(t.Path, "vbaloop");
         var projects = RepoLocator.EnumerateOnboardedProjects(t.Path, repo);

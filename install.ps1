@@ -5,9 +5,14 @@
 .DESCRIPTION
     irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex
 
-    To pass parameters (e.g. run the setup wizard right after installing):
+    One line from the folder you want to work in: run it next to an existing .xlsm to import
+    that workbook, or in an empty folder to start a new project. In an interactive terminal the
+    installer continues straight into `vbaloop setup` there. Shells without a console input
+    (coding agents, CI, -NonInteractive) are never prompted; they get agent guidance instead.
 
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1))) -Setup
+    To install only (no setup), set VBALOOP_NO_SETUP=1 first, or pass -NoSetup:
+
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1))) -NoSetup
 
     Equivalent to downloading vbaloop.exe and double-clicking it, except for SmartScreen:
     an unsigned exe fetched by a browser goes through the "Windows protected your PC" prompt,
@@ -21,7 +26,11 @@
     `irm | iex` keeps a UTF-8 BOM as U+FEFF, which breaks the first token of the script.
 
 .PARAMETER Setup
-    Run the vbaloop setup wizard right after installing.
+    Run the vbaloop setup wizard right after installing, even when the shell does not look
+    interactive.
+
+.PARAMETER NoSetup
+    Install only. Same as setting the VBALOOP_NO_SETUP environment variable.
 
 .PARAMETER Version
     Install a specific release tag (e.g. v1.2.3). Defaults to the latest release.
@@ -29,6 +38,7 @@
 [CmdletBinding()]
 param(
     [switch]$Setup,
+    [switch]$NoSetup,
     [string]$Version
 )
 
@@ -149,21 +159,43 @@ public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint Msg, UIntPtr w
     }
     if (($env:Path -split ';') -notcontains $InstallDir) { $env:Path += ";$InstallDir" }
 
-    # --- 5. Environment check -----------------------------------------------
+    # --- 5. Next step --------------------------------------------------------
+    # A person in a terminal gets the project started right here: the wizard looks at the
+    # current folder first (an .xlsm to import, an empty folder for a new project). Agent shells
+    # have no console input (stdin redirected / -NonInteractive / CI): a prompt there would hang
+    # or read EOF, so they never get the wizard - they get the agent procedure instead.
+    $nonInteractiveArg = @([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }).Count -gt 0
+    $interactive = ($Host.Name -eq 'ConsoleHost') -and -not [Console]::IsInputRedirected -and
+        -not $env:CI -and -not $nonInteractiveArg
+    $runSetup = $Setup -or ($interactive -and -not $NoSetup -and -not $env:VBALOOP_NO_SETUP)
+
+    Write-Host ''
+    if ($runSetup) {
+        Write-Step "Starting vbaloop setup in $((Get-Location).ProviderPath)"
+        Write-Host '    Ctrl+C to stop here; run "vbaloop setup" again any time to continue.'
+        Write-Host ''
+        & $ExePath setup
+        return
+    }
+
     Write-Step 'Checking environment'
     & $ExePath doctor
     $doctorExit = $LASTEXITCODE
 
     Write-Host ''
-    if ($Setup) {
-        & $ExePath setup
-        return
+    if ($interactive) {
+        Write-Host 'Installed. Next step:' -ForegroundColor Cyan
+        Write-Host '  vbaloop setup      dev environment wizard (workbook or new project -> harness -> verify)'
+    } else {
+        Write-Host 'Installed. Next steps for a coding agent:' -ForegroundColor Cyan
+        Write-Host "  exe        $ExePath"
+        Write-Host '             (use this absolute path - this shell''s PATH may predate the install)'
+        Write-Host '  procedure  https://github.com/rfastball/vbaloop/blob/master/AGENT_SETUP.md'
+        Write-Host '  preview    vbaloop setup --plan --json --workbook <path.xlsm> | --new <name> | --folder <dir>'
+        Write-Host '  consent    ask the user before adding --enable-vbom (it turns on an Excel security setting)'
     }
-
-    Write-Host 'Installed. Next step:' -ForegroundColor Cyan
-    Write-Host '  vbaloop setup      dev environment wizard (folder -> workbook -> harness -> verify)'
     if ($doctorExit -ne 0) {
         Write-Host ''
-        Write-Warn2 'doctor reported environment issues - setup walks you through the ones it can fix.'
+        Write-Warn2 'doctor reported environment issues - setup reports the ones it can fix.'
     }
 }

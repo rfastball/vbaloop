@@ -7,7 +7,7 @@ namespace VbaLoop.Core;
 public sealed class ProjectConfig
 {
     public required string RootDir { get; init; }
-    /// <summary>실제로 읽은 설정 파일(vbaloop.toml, 또는 이전 전이면 vbaflow.toml). 경로를 조립하지 말고 이걸 쓴다.</summary>
+    /// <summary>실제로 읽은 설정 파일(--config로 다른 이름을 줄 수 있다). 경로를 조립하지 말고 이걸 쓴다.</summary>
     public string TomlPath { get; init; } = "";
     public required string ProjectName { get; init; }
     /// <summary>워크북 절대 경로.</summary>
@@ -61,17 +61,10 @@ public sealed class ProjectConfig
         {
             var candidate = Path.Combine(dir.FullName, "vbaloop.toml");
             if (File.Exists(candidate)) return candidate;
-            // 개명 전 프로젝트(vbaflow.toml)도 그대로 동작 — vbaloop init이 새 이름으로 이전한다
-            var legacy = Path.Combine(dir.FullName, LegacyNames.TomlFile);
-            if (File.Exists(legacy)) return legacy;
             dir = dir.Parent;
         }
         return null;
     }
-
-    /// <summary>개명 전 설정 파일(vbaflow.toml)인지 — init이 이전 대상으로 다룬다.</summary>
-    public static bool IsLegacyToml(string tomlPath)
-        => string.Equals(Path.GetFileName(tomlPath), LegacyNames.TomlFile, StringComparison.OrdinalIgnoreCase);
 
     public static ProjectConfig Load(string? configOverride, string cwd)
     {

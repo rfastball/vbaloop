@@ -58,7 +58,7 @@ public static class StatusCommand
             : info.Detail != null ? $" ({info.Detail})" : ""));
         o.HumanLines.Add(LeaseCommand.DescribeState(lease));
         o.HumanLines.Add($"workbook: {cfg.WorkbookPath}" + (File.Exists(cfg.WorkbookPath) ? "" : " (파일 없음!)"));
-        o.HumanLines.Add($"config  : {cfg.TomlPath}" + (ProjectConfig.IsLegacyToml(cfg.TomlPath) ? " (옛 이름 — vbaloop init으로 이전)" : ""));
+        o.HumanLines.Add($"config  : {cfg.TomlPath}");
         o.HumanLines.Add($"src     : {cfg.SrcRoot} (최종 수정 {Fmt(srcLastModified)})");
         o.HumanLines.Add($"push    : {Fmt(lastPushAt)} — {freshness}");
 

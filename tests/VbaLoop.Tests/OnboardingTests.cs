@@ -136,7 +136,7 @@ public class OnboardingTests
     }
 
     [Fact]
-    public void Analyze_DriftedShimAndLegacyDoc_ReportsDrift()
+    public void Analyze_DriftedShimAndUnmarkedDoc_ReportsDrift()
     {
         using var t = new TempDir();
         t.File("Book.xlsm");
@@ -146,7 +146,7 @@ public class OnboardingTests
         var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
         Assert.Equal(ArtifactStatus.Ok, items[0].Status);       // toml
         Assert.Equal(ArtifactStatus.Drift, items[1].Status);    // shim
-        Assert.Equal(ArtifactStatus.Drift, items[2].Status);    // CLAUDE.md (레거시 헤딩)
+        Assert.Equal(ArtifactStatus.Drift, items[2].Status);    // CLAUDE.md (마커 없는 블록 헤딩)
         Assert.Equal(ArtifactStatus.Missing, items[3].Status);  // AGENTS.md
         Assert.Equal(ArtifactStatus.Missing, items[4].Status);  // 스킬
         Assert.Equal(ArtifactStatus.Missing, items[5].Status);  // pitfall 참조

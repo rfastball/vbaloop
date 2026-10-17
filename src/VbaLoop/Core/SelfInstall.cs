@@ -77,6 +77,14 @@ public static class SelfInstall
         return true;
     }
 
+    /// <summary>사용자 PATH(HKCU\Environment)에 설치 폴더가 이미 있는가 — setup --plan용 읽기 전용 판정.</summary>
+    public static bool IsOnUserPath()
+    {
+        using var env = Registry.CurrentUser.OpenSubKey("Environment", writable: false);
+        string raw = env?.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
+        return !AddToPathValue(raw, InstallDir).Changed;
+    }
+
     private static readonly IntPtr HWND_BROADCAST = new(0xFFFF);
     private const uint WM_SETTINGCHANGE = 0x001A;
     private const uint SMTO_ABORTIFHUNG = 0x0002;

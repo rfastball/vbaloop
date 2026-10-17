@@ -193,15 +193,44 @@ cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프�
 - **10.2** `setup`: 환경 점검 → AccessVBOM(동의 후) → `%LOCALAPPDATA%\vbaloop\bin` 설치 + 사용자 PATH →
   폴더 선택 → 워크북 생성 또는 채택 → `init` → 검증(신규는 push+test 초록불, 기존은 pull).
   `--folder <경로> --yes`면 비대화형이다. exe를 더블클릭하면 setup으로 진입한다.
+  - 시작점은 셋 중 하나다. 기존 워크북(`--workbook`, exe에 드래그 앤 드롭, 파일 선택), 새 프로젝트(`--new <이름>`),
+    준비된 폴더(`--folder`). 인자 없는 대화형 실행은 앞의 둘 중 하나를 묻고, 비우면 폴더 선택으로 간다.
+  - 셸에서 인자 없이 부르면(설치 스크립트가 이어서 부르는 경우 포함) 현재 폴더를 먼저 제안한다. 프로젝트면
+    다시 세팅, `.xlsm`이 1개면 그것을, 여러 개면 번호로 고르게, `.`으로 시작하는 항목 말고 비었으면 여기에 새
+    프로젝트(폴더 이름 = 워크북 이름). 거절하면 위의 일반 흐름으로 간다. 더블클릭은 cwd가 exe 위치라 건너뛴다.
+  - 기존 워크북은 원본을 건드리지 않는다. 원본 옆 `<이름>\`에 사본을 만든다(읽기 전용 특성 해제). 그 이름이
+    남의 폴더면 `<이름> (2)`…를 쓰고, 이전 setup의 흔적(같은 워크북을 가리키는 toml, 또는 원본과 같은 사본)이
+    있으면 재사용해 재실행이 멱등이다. 원본이 이미 프로젝트 안에 있으면 그 자리에서 쓴다.
+  - 새 프로젝트의 부모 폴더는 셸에서는 cwd, 더블클릭이면 `%USERPROFILE%\vbaloop-projects`다. 더블클릭의 cwd는
+    exe 위치라 의미가 없고, 문서·바탕화면은 OneDrive로 리디렉션되기 쉬워 피한다.
+  - 대화형이고 PATH에 claude가 있으면 끝에서 그 폴더에 `cmd /k claude` 새 창을 띄울지 묻는다. 마법사가 claude를
+    자식으로 기다리지 않는 것은 Excel RCW를 쥔 채 살아 있지 않기 위해서다.
 - **10.3** 릴리스 exe는 self-contained 단일 파일이다(런타임 설치 불필요). Excel COM을 늦은 바인딩으로 쓰므로
   트리밍·AOT는 하지 않는다.
 - **10.4** 릴리스: `v*` 태그 → 테스트 → publish → 스모크 → zip/exe/checksums → attestation → GitHub Release.
   `-`가 붙은 태그는 prerelease다.
-- **10.5** `install.ps1`: 최신 릴리스를 받아 SHA-256을 확인(실패 시 설치하지 않음)하고 설치·PATH 등록·doctor까지
-  한다. ASCII 전용이고 호출자 셸을 닫지 않는다.
+- **10.5** `install.ps1`: 최신 릴리스를 받아 SHA-256을 확인(실패 시 설치하지 않음)하고 설치·PATH 등록까지 한다.
+  ASCII 전용이고 호출자 셸을 닫지 않는다. 다음 단계는 셸 종류로 갈린다.
+  - 사람의 터미널(ConsoleHost이고 입력이 리다이렉트되지 않았으며 `-NonInteractive`·`CI`가 아님)이면 현재 위치에서
+    `vbaloop setup`으로 이어진다. "워크북이 있는 폴더(또는 빈 폴더)에서 한 줄"이 곧 프로젝트 시작이 되게 하는 것이
+    목적이다. 설치만 하려면 `VBALOOP_NO_SETUP=1` 또는 `-NoSetup`, 강제로 이으려면 `-Setup`.
+  - 그 외(에이전트·CI)에는 프롬프트를 띄우지 않는다. 입력이 없으면 프롬프트는 멈추거나 EOF를 읽기 때문이다.
+    대신 doctor를 돌리고 에이전트용 안내(exe 절대 경로, AGENT_SETUP.md, `setup --plan`, `--enable-vbom` 동의 규칙)를
+    출력한다.
 - **10.6** PATH를 기록한 뒤 `WM_SETTINGCHANGE`를 브로드캐스트해 새 터미널에 바로 반영한다.
 - **10.7** 프로젝트에 주입하는 VBA 텍스트(LogShim, 샘플, `modBuildInfo`)는 ASCII 전용이다. 어떤 ACP에서도
   push 가드를 통과한다.
+- **10.8** 에이전트 주도 설치. 사용자는 코드 에이전트에게 [AGENT_SETUP.md](AGENT_SETUP.md)를 따르라고만 하고,
+  에이전트가 설치 → 계획 → 동의 → 실행 → 보고를 한다. 이를 위한 계약은 셋이다.
+  - **동의 분리**: `--yes`는 프롬프트 생략일 뿐이고 AccessVBOM(보안 설정) 변경을 승인하지 않는다. 비대화형에서
+    AccessVBOM이 꺼져 있으면 `--enable-vbom`이 있을 때만 켜고, 없으면 exit 3 + `payload.consentRequired`로 멈춘다.
+    에이전트가 프롬프트를 넘기려고 붙인 플래그 하나로 보안 설정이 바뀌는 길을 막는 것이 목적이다.
+  - **`setup --plan`**: 레지스트리·파일시스템을 읽기만 해서 프로젝트 결정, 바뀌는 것(`changes`), 동의 항목
+    (`consent`: 동의/거절 시 붙일 플래그), 실행 명령(`command`)을 돌려준다. 막는 요인이 있으면 ok=false지만
+    payload는 채운다. `--new`는 cwd 기준이라 `command`에는 확정된 절대 경로를 `--folder`로 넣는다.
+  - **`payload.next`**: setup을 부른 에이전트 세션은 다른 폴더에서 돌고 있어 새 프로젝트의 관리 블록·스킬이
+    로드돼 있지 않다. 그 세션에서 이어갈 방법(`continueHere`)과 프로젝트 폴더에서 새 세션을 여는 명령
+    (`newSession`, PATH에서 찾은 claude/codex별)을 준다. 에이전트 셸의 PATH는 설치 전으로 굳어 있어 exe는 절대 경로다.
 
 ## 11. 세션 안전 모델
 
@@ -242,11 +271,3 @@ stale로 취급하지 않는다.
 - `stop`은 분리만 한다.
 - poison·타임아웃은 항상 격리한다.
 - read-only로 열려 있거나 여러 인스턴스에 열려 있으면 거부한다.
-
-## 12. 옛 이름(vbaflow) 호환
-
-`vbaflow.toml`, `vbaflow:managed` 마커, `.claude\skills\vbaflow\`, `VBAFLOW_SESSION_ID`를 읽는다.
-`vbaloop init`이 새 이름으로 옮긴다(`Core.LegacyNames`).
-- toml은 내용 그대로 이동한다.
-- 옛 스킬 폴더는 관리 파일만 지운다.
-- 옛 설치 폴더와 PATH는 건드리지 않는다.

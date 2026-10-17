@@ -8,7 +8,7 @@ internal static class NativeMethods
     public const uint OBJID_NATIVEOM = 0xFFFFFFF0;
     public static readonly Guid IID_IDispatch = new("00020400-0000-0000-C000-000000000046");
 
-    // 모달 워치독용 메시지/플래그 (Watch-Modal.ps1 이식)
+    // 모달 워치독용 메시지/플래그
     public const uint WM_GETTEXT = 0x000D;
     public const uint WM_CLOSE = 0x0010;
     public const uint BM_CLICK = 0x00F5;

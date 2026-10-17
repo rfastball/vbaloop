@@ -62,7 +62,7 @@ public static class LeaseCommand
         }
         if (!state.Mine)
         {
-            // release는 owner만 가능 — 타 소유자 제거는 break --force가 유일 수단(vh 동일)
+            // release는 owner만 가능 — 타 소유자 제거는 break --force가 유일 수단
             o.Payload = new { action = "refused", ownerThread = state.Owner?.OwnerThread };
             o.Fail($"내 lease가 아님: {state.Owner?.OwnerThread ?? "(owner 판독 불가)"}",
                 "타 소유자 lease 제거는 vbaloop lease break --force");

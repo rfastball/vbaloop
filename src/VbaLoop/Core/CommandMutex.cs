@@ -7,8 +7,8 @@ namespace VbaLoop.Core;
 /// 프로젝트당 vbaloop 명령 직렬화 — OS named mutex.
 /// project lease는 "어느 에이전트가 이 프로젝트를 소유하나"를 다루지만, 같은 소유자
 /// (동일 호스트 아래 서브에이전트들)의 동시 명령은 걸러내지 못한다 — 둘 다 renew로
-/// 게이트를 통과해 push+test가 같은 Excel에 인터리브될 수 있음(검토 확정, vh runtime
-/// lease의 잔여 존재 이유). 커널 뮤텍스는 보유자 사망 시 자동 해제되므로 staleness
+/// 게이트를 통과해 push+test가 같은 Excel에 인터리브될 수 있음(검토 확정).
+/// 커널 뮤텍스는 보유자 사망 시 자동 해제되므로 staleness
 /// 개념 자체가 없다 — AbandonedMutexException은 획득 취급.
 /// </summary>
 public sealed class CommandMutex : IDisposable

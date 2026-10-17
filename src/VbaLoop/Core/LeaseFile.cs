@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace VbaLoop.Core;
 
-/// <summary>lease 소유자 레코드 — vh-core.ps1 project lease owner.json 스키마 이식.</summary>
+/// <summary>lease 소유자 레코드(_dbg\lease.json의 owner).</summary>
 public sealed class LeaseOwner
 {
     [JsonPropertyName("schema")] public int Schema { get; set; } = 1;
@@ -28,10 +28,10 @@ public sealed class LeaseOwner
 
 /// <summary>
 /// 프로젝트 lease 파일(&lt;루트&gt;\_dbg\lease.json)의 원자 조작 + 회수 결정 테이블.
-/// vh-core.ps1 이식이되 두 가지 수정:
-/// (1) claim이 "빈 파일 생성 후 내용 기록" 2단계가 아니라 **완전한 JSON tmp의 무-덮어쓰기
-///     Move 1단계** — 부분 내용 관찰 창(owner null 오판 → 락 강탈)을 제거 (vh 원본의 결함 수정).
-/// (2) process-bound owner에도 유휴 백스톱 추가 — 자동 획득 모델에서는 명시 release 의식이
+/// 두 가지 설계 요점:
+/// (1) claim은 "빈 파일 생성 후 내용 기록" 2단계가 아니라 **완전한 JSON tmp의 무-덮어쓰기
+///     Move 1단계**다 — 부분 내용 관찰 창(owner null 오판 → 락 강탈)이 생기지 않는다.
+/// (2) process-bound owner에도 유휴 백스톱이 있다 — 자동 획득 모델에서는 명시 release 의식이
 ///     없으므로, 장수 호스트가 "존재만" 해도 영구 점유하는 것을 expiresAt+grace로 회수 가능하게.
 ///     활동 중 에이전트는 매 게이트 명령이 renew하므로 절대 뺏기지 않는 속성은 유지된다.
 /// </summary>
@@ -123,7 +123,7 @@ public static class LeaseFile
     }
 
     /// <summary>
-    /// 회수 결정 테이블 (vh Test-LeaseAutoReclaimable + 유휴 백스톱 수정).
+    /// 회수 결정 테이블 (유휴 백스톱 포함).
     /// isProcessAlive/clock/파일 연령은 주입 — 단위 테스트 대상.
     /// </summary>
     public static bool IsAutoReclaimable(
@@ -156,7 +156,7 @@ public static class LeaseFile
         return idleExpired;
     }
 
-    /// <summary>소유 판정 (vh Test-IsProjectLeaseOwner): thread+host+user 3중 일치.</summary>
+    /// <summary>소유 판정: thread+host+user 3중 일치.</summary>
     public static bool IsOwnedBy(LeaseOwner owner, string ownerThread, string localHost, string localUser)
         => string.Equals(owner.OwnerThread, ownerThread, StringComparison.Ordinal)
            && string.Equals(owner.Host, localHost, StringComparison.OrdinalIgnoreCase)

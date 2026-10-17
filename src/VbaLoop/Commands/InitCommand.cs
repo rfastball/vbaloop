@@ -107,8 +107,7 @@ public static class InitCommand
         int failed = 0, drifted = 0, shimUpdated = 0;
         foreach (var (name, root) in projects)
         {
-            var tomlPath = ProjectConfig.FindTomlPath(Path.Combine(root, "vbaloop.toml"), root)
-                ?? ProjectConfig.FindTomlPath(Path.Combine(root, LegacyNames.TomlFile), root); // 이전 전 프로젝트
+            var tomlPath = ProjectConfig.FindTomlPath(Path.Combine(root, "vbaloop.toml"), root);
             try
             {
                 var items = Onboarding.Analyze(root, tomlPath, shimLines, docsBody, skillLines, pitfallLines, distLines);
@@ -167,8 +166,6 @@ public static class InitCommand
     {
         ArtifactAction.Created => "created",
         ArtifactAction.Overwritten => "overwritten",
-        ArtifactAction.Migrated => "migrated",
-        ArtifactAction.Removed => "removed",
         _ => "unchanged",
     };
 

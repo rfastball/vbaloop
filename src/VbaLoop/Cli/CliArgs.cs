@@ -34,6 +34,16 @@ public sealed class CliArgs
     public bool StripComments { get; private set; }
     /// <summary>setup 전용: 대상 프로젝트 폴더(생략 시 폴더 선택 대화상자).</summary>
     public string? Folder { get; private set; }
+    /// <summary>setup 전용: 가져올 기존 워크북(.xlsm). 원본 옆 &lt;이름&gt;\ 폴더에 사본을 만들어
+    /// 프로젝트로 쓴다(--folder를 주면 그 폴더). exe에 워크북을 드래그 앤 드롭한 경우도 이것으로 온다.</summary>
+    public string? Workbook { get; private set; }
+    /// <summary>setup 전용: 새 빈 프로젝트 이름. cwd 아래 &lt;이름&gt;\ 폴더에 &lt;이름&gt;.xlsm과 샘플 테스트를 만든다.</summary>
+    public string? NewName { get; private set; }
+    /// <summary>setup 전용: AccessVBOM(보안 설정)을 켜는 데 사용자가 동의했음. --yes는 이것을 포함하지 않는다 —
+    /// 에이전트가 프롬프트를 넘기려고 붙인 --yes로 보안 설정이 바뀌면 안 되기 때문(설계 §10.8).</summary>
+    public bool EnableVbom { get; private set; }
+    /// <summary>setup 전용: 아무것도 바꾸지 않고 할 일·필요한 동의·실행할 명령만 보고한다.</summary>
+    public bool Plan { get; private set; }
     /// <summary>setup/doctor 전용: 확인 프롬프트를 묻지 않고 승인으로 진행(비대화형 설치).</summary>
     public bool Yes { get; private set; }
     /// <summary>setup 전용: 마지막 push/test(또는 pull) 검증 단계를 건너뛴다 — Excel 불필요.</summary>
@@ -103,6 +113,8 @@ public sealed class CliArgs
                     break;
                 case "--yes" or "-y": r.Yes = true; break;
                 case "--skip-verify": r.SkipVerify = true; break;
+                case "--enable-vbom": r.EnableVbom = true; break;
+                case "--plan": r.Plan = true; break;
                 case "--no-install": r.NoInstall = true; break;
                 case "--install-only": r.InstallOnly = true; break;
                 case "--fix": r.Fix = true; break;
@@ -116,10 +128,18 @@ public sealed class CliArgs
                     if (++i >= args.Length) throw new CliError("--folder 뒤에 경로 필요");
                     r.Folder = args[i];
                     break;
+                case "--workbook":
+                    if (++i >= args.Length) throw new CliError("--workbook 뒤에 .xlsm 경로 필요");
+                    r.Workbook = args[i];
+                    break;
+                case "--new":
+                    if (++i >= args.Length) throw new CliError("--new 뒤에 프로젝트 이름 필요");
+                    r.NewName = args[i];
+                    break;
                 default:
                     if (args[i].StartsWith('-'))
                         throw new CliError($"미지 옵션: {args[i]}",
-                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --strip-comments");
+                            "지원 옵션: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <초> --config <경로> --module <이름> --out <경로> --bootstrap <Module.Proc> --folder <경로> --workbook <경로> --new <이름> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }
@@ -137,16 +157,31 @@ public sealed class CliArgs
     {
         for (int i = 0; i < argv.Length; i++)
         {
-            switch (argv[i])
-            {
-                case "--json":
-                    return true;
-                case "--timeout" or "--config" or "--runid" or "--macro" or "--module"
-                    or "--out" or "--bootstrap" or "--folder" or "--backup":
-                    i++; // 다음 토큰은 이 옵션의 값
-                    break;
-            }
+            if (argv[i] == "--json") return true;
+            if (ValueOptions.Contains(argv[i])) i++; // 다음 토큰은 이 옵션의 값
         }
         return false;
+    }
+
+    /// <summary>값을 하나 받는 옵션 — 다음 토큰은 옵션 값이지 위치 인자가 아니다.</summary>
+    public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
+    {
+        "--timeout", "--config", "--runid", "--macro", "--module",
+        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup",
+    };
+
+    /// <summary>
+    /// 옵션도 옵션 값도 아닌 위치 인자들. 드래그 앤 드롭 축약형(<c>vbaloop Book.xlsm --folder D:\x</c>)에서
+    /// 워크북 경로 수를 셀 때 --folder·--config 같은 값의 경로를 워크북으로 오인하지 않게 한다.
+    /// </summary>
+    public static List<string> Positionals(string[] argv)
+    {
+        var result = new List<string>();
+        for (int i = 0; i < argv.Length; i++)
+        {
+            if (ValueOptions.Contains(argv[i])) { i++; continue; }
+            if (!argv[i].StartsWith('-')) result.Add(argv[i]);
+        }
+        return result;
     }
 }

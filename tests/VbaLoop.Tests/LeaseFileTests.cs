@@ -26,7 +26,7 @@ public class LeaseFileTests
     private static bool Reclaimable(LeaseOwner? o, bool alive = true, DateTime? fileAge = null)
         => LeaseFile.IsAutoReclaimable(o, Now, (_, _) => alive, Host, fileAge ?? Now.AddMinutes(-5));
 
-    // ---- 회수 결정 테이블 (vh 이식 + 유휴 백스톱 수정) ----
+    // ---- 회수 결정 테이블 (유휴 백스톱 포함) ----
 
     [Fact]
     public void NullOwner_ReclaimableOnlyAfterMinAge()

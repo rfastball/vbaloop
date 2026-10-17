@@ -135,4 +135,45 @@ public class CliArgsTests
     [Fact]
     public void Parse_SkipCompile()
         => Assert.True(CliArgs.Parse(new[] { "--skip-compile" }).SkipCompile);
+
+    [Fact]
+    public void Parse_SetupWorkbookAndNew()
+    {
+        var wb = CliArgs.Parse(new[] { "--workbook", @"C:\work\Book.xlsm", "--folder", @"D:\dev\Book" });
+        Assert.Equal(@"C:\work\Book.xlsm", wb.Workbook);
+        Assert.Equal(@"D:\dev\Book", wb.Folder);
+        Assert.Equal("MyTool", CliArgs.Parse(new[] { "--new", "MyTool" }).NewName);
+    }
+
+    [Fact]
+    public void Positionals_SkipOptionValues()
+    {
+        // 축약형 "vbaloop Book.xlsm --folder D:\dest --config C:\r\vbaloop.toml --json"의 워크북은 하나다
+        var argv = new[] { @"C:\w\Book.xlsm", "--folder", @"D:\dest", "--config", @"C:\r\vbaloop.toml", "--json" };
+        Assert.Equal(new[] { @"C:\w\Book.xlsm" }, CliArgs.Positionals(argv));
+        Assert.Equal(new[] { "a.xlsm", "b.xlsm" }, CliArgs.Positionals(new[] { "a.xlsm", "b.xlsm" }));
+    }
+
+    [Fact]
+    public void Parse_EnableVbomAndPlan_AreSeparateFromYes()
+    {
+        var yesOnly = CliArgs.Parse(new[] { "--yes" });
+        Assert.False(yesOnly.EnableVbom); // --yes는 보안 설정 동의를 포함하지 않는다
+        var r = CliArgs.Parse(new[] { "--plan", "--enable-vbom" });
+        Assert.True(r.Plan);
+        Assert.True(r.EnableVbom);
+        Assert.False(r.Yes);
+    }
+
+    [Theory]
+    [InlineData("--workbook")]
+    [InlineData("--new")]
+    public void Parse_SetupValueOption_MissingValue_Throws(string opt)
+        => Assert.Throws<VbaLoop.Core.CliError>(() => CliArgs.Parse(new[] { opt }));
+
+    [Theory]
+    [InlineData("--workbook")]
+    [InlineData("--new")]
+    public void RawArgsRequestJson_SetupValueOption_ConsumesValue(string opt)
+        => Assert.False(CliArgs.RawArgsRequestJson(new[] { "setup", opt, "--json" }));
 }

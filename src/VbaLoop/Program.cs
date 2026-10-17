@@ -24,6 +24,25 @@ internal static class Program
             return 0;
         }
 
+        // 탐색기에서 워크북을 exe 위로 끌어다 놓으면 인자가 그 파일 경로로만 온다 — 명령(verb)은
+        // 경로 문자를 포함하지 않으므로 setup --workbook으로 해석한다. 셸에서 `vbaloop Book.xlsm`도 같다.
+        if (WorkbookIntake.LooksLikePath(args[0]))
+        {
+            int paths = CliArgs.Positionals(args).Count(WorkbookIntake.LooksLikePath);
+            if (paths > 1)
+            {
+                var multi = new Outcome { Command = "setup" };
+                multi.Fail($"워크북은 하나만 가져올 수 있음 (받은 파일 {paths}개)",
+                    "워크북 파일 하나만 끌어다 놓거나 vbaloop setup --workbook <경로.xlsm>");
+                Output.Print(multi, json: false);
+                ConsoleHost.PauseIfOwnConsole();
+                return multi.ExitCode;
+            }
+            if (ConsoleHost.IsOwnConsole() && args.Length == 1)
+                return RunSetupFromDoubleClick(args[0]);
+            args = new[] { "setup", "--workbook" }.Concat(args).ToArray(); // 뒤따르는 옵션(--json 등) 유지
+        }
+
         string verb = args[0];
         // 파싱 실패 시 opts.Json을 못 읽으므로 raw argv에서 --json을 미리 감지(xlFlow rawArgsRequestJSON)
         bool rawJson = CliArgs.RawArgsRequestJson(args);
@@ -102,13 +121,16 @@ internal static class Program
     /// <summary>
     /// 탐색기 더블클릭 진입: 마법사를 돌리고, 콘솔 창이 즉시 닫혀 결과를 못 읽는 일이 없도록
     /// 끝에서 입력을 기다린다. 예외도 여기서 사람이 읽을 수 있게 출력한다.
+    /// <paramref name="droppedWorkbook"/>은 exe 위로 드래그 앤 드롭된 워크북 경로.
     /// </summary>
-    private static int RunSetupFromDoubleClick()
+    private static int RunSetupFromDoubleClick(string? droppedWorkbook = null)
     {
         var outcome = new Outcome { Command = "setup" };
         try
         {
-            outcome = SetupCommand.Run(CliArgs.Parse(Array.Empty<string>()));
+            outcome = SetupCommand.Run(CliArgs.Parse(droppedWorkbook == null
+                ? Array.Empty<string>()
+                : new[] { "--workbook", droppedWorkbook }));
         }
         catch (CliError e)
         {
@@ -134,19 +156,21 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--folder <경로>] [--yes] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
         return o;
     }
 
     private static void PrintUsage() => Console.Error.WriteLine(UsageText());
 
     private static string UsageText() => """
-        vbaloop (vf) - Excel VBA 프로젝트를 위한 최소 에이전트 개발 루프
+        vbaloop - Excel VBA 프로젝트를 위한 최소 에이전트 개발 루프
 
-        처음이라면: vbaloop setup   (환경 점검 -> 설치 -> 폴더 선택 -> 워크북 -> 하네스 -> 검증)
+        처음이라면: vbaloop setup   (환경 점검 -> 설치 -> 워크북/폴더 선택 -> 하네스 -> 검증)
+        기존 워크북: vbaloop.exe 위로 .xlsm을 끌어다 놓기 (원본 옆 <이름>\ 폴더에 사본을 만들어 작업)
+        새 프로젝트: vbaloop setup --new <이름>   (.\<이름>\ 에 워크북 + 샘플 테스트)
 
         사용법:
-          vbaloop setup   [--folder <경로>] [--yes] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --install-only는 exe 설치만)
+          vbaloop setup   [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --workbook은 기존 워크북 사본으로, --new는 .\<이름>\ 새 프로젝트로 시작, --plan은 변경 없이 계획만, --enable-vbom은 AccessVBOM 변경 동의(--yes에 미포함), --install-only는 exe 설치만)
           vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 전 프로젝트 일괄)
           vbaloop doctor  [--json] [--kill-orphans] [--fix]  환경 점검 + 고아 Excel 리포트(kill/fix는 명시 시)
           vbaloop status  [--json]                 세션/프로젝트 상태
