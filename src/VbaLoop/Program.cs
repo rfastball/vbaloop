@@ -64,6 +64,19 @@ internal static class Program
             return RunnerMain.Run(opts);
         if (verb == "__probe")
             return Excel.SessionProbe.RunChild(opts);
+        if (verb == UpdateCheck.ChildVerb)
+            return UpdateCheck.RunChild();
+
+        // vbaloop update가 남긴 이전 exe(vbaloop.exe.old) 정리 — 설치 폴더에서 돌 때만(설계 §12.5)
+        string? exeDir = Environment.ProcessPath != null ? Path.GetDirectoryName(Environment.ProcessPath) : null;
+        if (exeDir != null && PathDrift.SamePath(exeDir, SelfInstall.InstallDir))
+            SelfReplace.CleanupOld(exeDir);
+
+        // 프로젝트를 읽는 명령의 부수 신호: 사용자 프로젝트 레지스트리에 루트 기록(설계 §12.6, init --all 대상),
+        // 관리 스탬프가 이 exe보다 새로우면 경고(§12.3). 쓰기(init)는 자체적으로 거부하고, push/test 등은
+        // 막지 않는다 - 원인은 exe라 루프를 세울 이유가 없다.
+        var warnings = new List<string>();
+        ProjectConfig.Loaded = cfg => OnProjectLoaded(cfg, warnings);
 
         var outcome = new Outcome { Command = verb };
         try
@@ -87,6 +100,7 @@ internal static class Program
                 "rollback" => RollbackCommand.Run(opts),
                 "bugreport" => BugReportCommand.Run(opts),
                 "version" or "--version" => VersionCommand.Run(opts),
+                "update" => UpdateCommand.Run(opts),
                 "help" or "--help" or "-h" => UsageOutcome(),
                 _ => UnknownVerb(verb),
             };
@@ -103,7 +117,13 @@ internal static class Program
         // opts.Json이 authoritative지만, --json이 값으로 소비됐거나 verb 위치에 온 경로까지
         // 균일하게 봉투를 유지하도록 rawJson을 폴백으로 OR (xlFlow a.json || rawArgsRequestJSON)
         // 출력이 RCW 정리보다 먼저다: 격리된(VBA 실행 중) Excel의 프록시 Release는 무기한 블록할 수 있다.
+        // 새 릴리스 알림(설계 §12.4): 사람이 상태를 보는 명령에서만, 캐시만 읽는다(stale이면 분리된 자식이 갱신)
+        if (verb is "status" or "doctor" or "version" or "--version" || (verb == "init" && opts.Check))
+            outcome.Update = UpdateCheck.Poll(repoBuild: exeDir != null && RepoLocator.FindRepoRoot(exeDir) != null);
+
         Output.Print(outcome, opts.Json || rawJson);
+        foreach (var w in warnings)
+            Console.Error.WriteLine($"vbaloop {verb}: warning: {w}");
 
         // 격리·busy로 응답 없는 Excel의 RCW를 쥐고 있으면 그 프록시 Release가 무기한 블록한다. 주 STA
         // 스레드는 어떤 대기에서든 COM을 펌프해 그 호출을 받으므로 시간 제한도 무력하다(런타임 실측
@@ -116,6 +136,14 @@ internal static class Program
         if (!ComCleanup.Run(TimeSpan.FromSeconds(5)))
             ComCleanup.HardExit(outcome.ExitCode);
         return outcome.ExitCode;
+    }
+
+    private static void OnProjectLoaded(ProjectConfig cfg, List<string> warnings)
+    {
+        ProjectRegistry.TryAdd(ProjectRegistry.DefaultPath, cfg.RootDir);
+        if (ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy) != StampState.ExeOlder) return;
+        var w = $"{ManagedStamp.DescribeExeOlder(cfg.ManagedBy!, ExeVersion.Text)} - {ManagedStamp.UpdateHint} 권장 (init은 거부됨)";
+        if (!warnings.Contains(w)) warnings.Add(w);
     }
 
     /// <summary>
@@ -156,7 +184,7 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <이름>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <경로>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <제목> | --list", "version", "update [--check] [--yes] [--force]" } };
         return o;
     }
 
@@ -171,7 +199,7 @@ internal static class Program
 
         사용법:
           vbaloop setup   [--workbook <경로.xlsm> | --new <이름> | --folder <경로>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]  개발환경 마법사(대화형, --workbook은 기존 워크북 사본으로, --new는 .\<이름>\ 새 프로젝트로 시작, --plan은 변경 없이 계획만, --enable-vbom은 AccessVBOM 변경 동의(--yes에 미포함), --install-only는 exe 설치만)
-          vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 전 프로젝트 일괄)
+          vbaloop init    [--check] [--all] [--json]  온보딩 부트스트랩/드리프트 수렴 (Excel 불필요, --all은 등록된 전 프로젝트 일괄)
           vbaloop doctor  [--json] [--kill-orphans] [--fix]  환경 점검 + 고아 Excel 리포트(kill/fix는 명시 시)
           vbaloop status  [--json]                 세션/프로젝트 상태
           vbaloop diff    [--json] [--module <이름>]  워크북 VBProject vs src 읽기 전용 비교 (일회용 모드는 읽기 전용 Excel, persistent는 활성 세션 필요)
@@ -187,7 +215,8 @@ internal static class Program
           vbaloop lease   acquire|release|status|break [--force]   다중 에이전트 lease
           vbaloop lint    [--json]                 규약/인코딩/헤더 전수 검사 (Excel 불필요)
           vbaloop bugreport "<제목>" | --list       vbaloop 자체 결함 리포트 생성/열거 (vbaloop\docs\bugreports)
-          vbaloop version                          실행 exe의 git 리비전 + 빌드 시각
+          vbaloop version                          실행 exe의 버전 + git 리비전 + 빌드 시각
+          vbaloop update  [--check] [--yes] [--force]   최신 릴리스로 설치본 갱신(SHA-256 검증) 후 init --all 여부 확인 (--yes: 묻지 않고 실행)
 
         공통: --config <vbaloop.toml 경로>  (기본: cwd에서 상위로 탐색)
         세션 모드: vbaloop.toml [excel] session = "ephemeral"(기본, 명령마다 숨은 Excel) | "persistent"

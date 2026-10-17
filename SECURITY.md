@@ -15,8 +15,8 @@ Nothing here is done silently: `setup` asks first, and `doctor` only reports unl
 | Change | When | How to undo |
 |---|---|---|
 | **Trust access to the VBA project object model** (`AccessVBOM=1` under `HKCU\Software\Microsoft\Office\<ver>\Excel\Security`) | `vbaloop setup` after you agree at its prompt, `setup --enable-vbom` (non-interactive; `--yes` alone never changes it), or `vbaloop doctor --fix` | Excel → Options → Trust Center → Macro Settings, or set the value back to `0` |
-| Copies `vbaloop.exe` to `%LOCALAPPDATA%\vbaloop\bin` and adds it to your **user** PATH | `vbaloop setup`, `setup --install-only`, `install.ps1` | Delete the folder and remove the PATH entry |
-| Per-user state in `%LOCALAPPDATA%\vbaloop\` (Excel PIDs it started or quarantined) | Any session command | Delete the folder |
+| Copies `vbaloop.exe` to `%LOCALAPPDATA%\vbaloop\bin` and adds it to your **user** PATH | `vbaloop setup`, `setup --install-only`, `install.ps1`, `vbaloop update` (replaces the exe after SHA-256 verification) | Delete the folder and remove the PATH entry |
+| Per-user state in `%LOCALAPPDATA%\vbaloop\`: Excel PIDs it started or quarantined (`excel-pids.json`), the project folders it has seen (`projects.json`, used by `init --all`), and the last release check (`update.json`) | Session commands; any command that reads a `vbaloop.toml`; `status`/`doctor`/`version`/`init --check` | Delete the folder |
 | Project files: `vbaloop.toml`, `src\LogShim.bas`, managed blocks in `CLAUDE.md`/`AGENTS.md`/`.gitignore`, `.claude\skills\vbaloop\`, and `_dbg\` (logs, session state, workbook backups) | `vbaloop init` / `setup`, and normal use | Delete them; content outside the managed markers is never touched |
 | A copy of your workbook in a new `<name>\` folder next to it (the original is never modified) | `setup --workbook`, or dropping a workbook on `vbaloop.exe` | Delete the folder |
 
@@ -27,8 +27,11 @@ only on a machine where you develop VBA, and turn it off when you are done if th
 
 ## What vbaloop does not do
 
-- It never sends your code or workbooks anywhere. It makes no network requests at runtime;
-  only `install.ps1` downloads the release from GitHub.
+- It never sends your code or workbooks anywhere. Its only network requests go to the GitHub API
+  and release downloads for this repository: at most once a day a background check of the latest
+  release number (from `status`, `doctor`, `version`, `init --check`; off in CI, for builds inside the
+  source repo, or with `VBALOOP_NO_UPDATE_CHECK=1`), and `vbaloop update` / `install.ps1`, which
+  download the release and refuse to install it unless its SHA-256 matches `checksums.txt`.
 - It does not need administrator rights and writes nothing outside your user profile and project folder.
 - On its own it ends an Excel process only if it started that process itself and has confirmed no other
   workbook is open in it; otherwise it quarantines and asks you (see DESIGN §11).

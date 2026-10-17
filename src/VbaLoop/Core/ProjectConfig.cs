@@ -47,8 +47,18 @@ public sealed class ProjectConfig
     /// <summary>일회용 인스턴스 메타(명령 하나 수명). 남아 있으면 비정상 종료한 명령의 잔재.</summary>
     public string EphemeralDir => Path.Combine(DbgDir, "ephemeral");
 
+    // ---- [vbaloop] 관리 스탬프(설계 §12, init이 기록) ----
+    /// <summary>관리 파일을 마지막으로 쓴 vbaloop 버전. 스탬프 도입 이전 프로젝트는 null.</summary>
+    public string? ManagedBy { get; init; }
+
+    /// <summary>
+    /// Load 성공 직후 호출되는 훅. Program이 프로젝트 레지스트리 기록·exe-older 경고에 쓴다 —
+    /// 순수 로더에 사용자 단위 부수효과를 넣지 않기 위해 주입한다(테스트는 null).
+    /// </summary>
+    public static Action<ProjectConfig>? Loaded { get; set; }
+
     private static readonly HashSet<string> KnownSections = new(StringComparer.OrdinalIgnoreCase)
-        { "project", "excel", "src", "dist", "backup", "push" };
+        { "project", "excel", "src", "dist", "backup", "push", ManagedStamp.Section };
     private static readonly Dictionary<string, HashSet<string>> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         ["project"] = new(StringComparer.OrdinalIgnoreCase) { "name" },
@@ -57,6 +67,9 @@ public sealed class ProjectConfig
         ["dist"] = new(StringComparer.OrdinalIgnoreCase) { "version", "exclude", "bootstrap", "stripcomments" },
         ["backup"] = new(StringComparer.OrdinalIgnoreCase) { "keep" },
         ["push"] = new(StringComparer.OrdinalIgnoreCase) { "compile" },
+        // [vbaloop]은 도구 소유 섹션 — 미지 키를 거부하지 않는다(미래 exe가 키를 늘려도 이 exe가
+        // 스탬프 비교까지는 도달해 "exe가 오래됨"을 말할 수 있게).
+        [ManagedStamp.Section] = new(StringComparer.OrdinalIgnoreCase) { ManagedStamp.Key },
     };
 
     public static string? FindTomlPath(string? configOverride, string cwd)
@@ -86,17 +99,29 @@ public sealed class ProjectConfig
                 "프로젝트 루트에서 vbaloop init 실행 (온보딩 부트스트랩)");
 
         var root = Path.GetDirectoryName(tomlPath)!;
-        var doc = TomlMini.Parse(File.ReadAllText(tomlPath), tomlPath);
-
-        foreach (var section in doc.Keys)
+        var text = File.ReadAllText(tomlPath);
+        Dictionary<string, Dictionary<string, object>> doc;
+        try
         {
-            if (!KnownSections.Contains(section))
-                throw new CliError($"{tomlPath}: 미지 섹션 [{section}]",
-                    "지원 섹션: [project], [excel], [src], [dist], [backup], [push]");
-            foreach (var key in doc[section].Keys)
-                if (!KnownKeys[section].Contains(key))
-                    throw new CliError($"{tomlPath}: 미지 키 [{section}].{key}",
-                        $"지원 키: {string.Join(", ", KnownKeys[section])}");
+            doc = TomlMini.Parse(text, tomlPath);
+            foreach (var section in doc.Keys)
+            {
+                if (!KnownSections.Contains(section))
+                    throw new CliError($"{tomlPath}: 미지 섹션 [{section}]",
+                        "지원 섹션: [project], [excel], [src], [dist], [backup], [push], [vbaloop]");
+                if (string.Equals(section, ManagedStamp.Section, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                foreach (var key in doc[section].Keys)
+                    if (!KnownKeys[section].Contains(key))
+                        throw new CliError($"{tomlPath}: 미지 키 [{section}].{key}",
+                            $"지원 키: {string.Join(", ", KnownKeys[section])}");
+            }
+        }
+        catch (CliError e) when (ExeOlderThan(text) is string stamp)
+        {
+            // 더 새 exe가 관리하는 프로젝트의 문법/키를 이 exe가 모를 수 있다 — 원인은 toml이 아니라 exe다
+            throw new CliError($"{ManagedStamp.DescribeExeOlder(stamp, ExeVersion.Text)} ({e.Message})",
+                ManagedStamp.UpdateHint, environment: true);
         }
 
         string? workbookRel = GetString(doc, "excel", "workbook");
@@ -113,7 +138,7 @@ public sealed class ProjectConfig
         var sessionMode = GetSessionMode(doc, tomlPath);
         bool pushCompile = GetStrictBool(doc, "push", "compile", tomlPath) ?? true;
 
-        return new ProjectConfig
+        var cfg = new ProjectConfig
         {
             RootDir = root,
             TomlPath = tomlPath,
@@ -128,7 +153,17 @@ public sealed class ProjectConfig
             DistStripComments = GetBool(doc, "dist", "stripComments") ?? false,
             BackupKeep = backupKeep,
             PushCompile = pushCompile,
+            ManagedBy = GetString(doc, ManagedStamp.Section, ManagedStamp.Key),
         };
+        Loaded?.Invoke(cfg);
+        return cfg;
+    }
+
+    /// <summary>toml 스탬프가 이 exe보다 새로우면 그 스탬프, 아니면 null.</summary>
+    private static string? ExeOlderThan(string tomlText)
+    {
+        var stamp = ManagedStamp.Read(tomlText);
+        return ManagedStamp.Decide(ExeVersion.Current, stamp) == StampState.ExeOlder ? stamp : null;
     }
 
     /// <summary>[backup] keep: 0 이상 정수만. 타입 오류는 조용히 기본값으로 떨어지지 않고 실패한다 —

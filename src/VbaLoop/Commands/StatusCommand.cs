@@ -63,6 +63,8 @@ public static class StatusCommand
         o.HumanLines.Add($"config  : {cfg.TomlPath}");
         o.HumanLines.Add($"src     : {cfg.SrcRoot} (최종 수정 {Fmt(srcLastModified)})");
         o.HumanLines.Add($"push    : {Fmt(lastPushAt)} — {freshness}");
+        var stampState = ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy);
+        o.HumanLines.Add($"managed : {DescribeStamp(cfg.ManagedBy, stampState)}");
 
         if (marker != null)
             o.Hint = RecoveryGate.HintFor(marker);
@@ -88,6 +90,12 @@ public static class StatusCommand
             lastPushFingerprint = sync.LastPushFingerprint,
             lastPullFingerprint = sync.LastPullFingerprint,
             srcDiffersFromPush,
+            managed = new
+            {
+                by = cfg.ManagedBy,
+                exe = ExeVersion.Text,
+                state = ManagedStamp.Label(stampState),
+            },
             recovery = RecoveryCommand.DescribeOrNull(marker),
             session = info.Meta == null ? null : new
             {
@@ -109,6 +117,15 @@ public static class StatusCommand
         };
         return o;
     }
+
+    /// <summary>관리 스탬프 한 줄 요약(status/doctor 공용).</summary>
+    public static string DescribeStamp(string? managedBy, StampState state) => state switch
+    {
+        StampState.Unstamped => $"스탬프 없음 (exe {ExeVersion.Text}) - 다음 init이 기록",
+        StampState.ExeOlder => $"{managedBy} > exe {ExeVersion.Text} - exe가 더 오래됨, vbaloop update 필요",
+        StampState.Invalid => $"managed_by 값이 semver가 아님: {managedBy}",
+        _ => $"{managedBy} (exe {ExeVersion.Text})",
+    };
 
     private static string Fmt(DateTime? dt) => dt?.ToString("yyyy-MM-dd HH:mm:ss'Z'") ?? "-";
 }

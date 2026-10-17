@@ -1,4 +1,3 @@
-using System.Reflection;
 using VbaLoop.Cli;
 using VbaLoop.Core;
 
@@ -28,26 +27,11 @@ public static class VersionCommand
         return o;
     }
 
-    /// <summary>InformationalVersion의 '+' 앞 semver(예: 1.2.3). 릴리스 태그에서 주입되며,
-    /// 로컬 빌드는 csproj 기본값이다 — 사용자가 "내 vbaloop가 몇 번인가"를 묻는 단위.</summary>
-    public static string GetVersion()
-    {
-        var info = Assembly.GetEntryAssembly()
-            ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (info == null) return "unknown";
-        var plus = info.IndexOf('+');
-        return plus >= 0 ? info[..plus] : info;
-    }
+    /// <summary>실행 exe의 semver 문자열 — Core.ExeVersion 위임(관리 스탬프·업데이트 알림과 같은 값).</summary>
+    public static string GetVersion() => ExeVersion.Text;
 
-    /// <summary>InformationalVersion의 '+' 뒤 리비전(예: 8acb552-dirty). doctor/bugreport와 공유.</summary>
-    public static string GetRevision()
-    {
-        var info = Assembly.GetEntryAssembly()
-            ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (info == null) return "unknown";
-        var plus = info.IndexOf('+');
-        return plus >= 0 && plus + 1 < info.Length ? info[(plus + 1)..] : info;
-    }
+    /// <summary>InformationalVersion의 '+' 뒤 리비전(예: v0.3.0-5-g8acb552-dirty). doctor/bugreport와 공유.</summary>
+    public static string GetRevision() => ExeVersion.Revision;
 
     /// <summary>exe 파일 mtime = publish 시각 (PublishSingleFile에서 신뢰 가능).</summary>
     public static string? GetBuildTime()

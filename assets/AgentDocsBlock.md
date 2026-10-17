@@ -3,6 +3,8 @@
 빌드/테스트 루프는 `vbaloop`(단일 exe)로 수행한다. PATH 미등록 시 설치 경로:
 `%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe` (그마저 없으면 `vbaloop setup`으로 재설치).
 온보딩/드리프트 복구: `vbaloop init` (검사만: `vbaloop init --check`).
+단, init --check가 exit 3 + `exe-older`(vbaloop.toml managed_by > 실행 exe)면 init으로 고치지 말고
+사용자에게 `vbaloop update`를 요청한다 (managed_by 줄 수정/삭제 금지).
 프로젝트 고유 내용은 이 관리 블록 밖에 작성한다 (init이 블록 내부를 덮어씀).
 
 1. 편집: src\*.bas/.cls/.frm 수정

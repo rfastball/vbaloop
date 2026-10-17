@@ -32,7 +32,8 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
 
 ### 공통 계약
 - `--json` 봉투: `{command, ok, exitCode, hint, session, errors[], payload}`. `session`은 이번 명령이
-  세션을 새로 띄웠을 때만 채워진다.
+  세션을 새로 띄웠을 때만 채워진다. 선택 필드 `update: {current, latest, command}`는 새 릴리스 알림이 있을 때만
+  덧붙는다(§12.4). `hint`의 의미(실패 시 다음 행동)는 바뀌지 않는다.
 - 종료 코드: 성공 0 / 환경 오류 3(세션 부재·stale·poison·busy·격리, Excel/COM 치명) / 그 외 2.
   실패하면 한 줄 에러와 `hint`(다음 행동)를 준다.
 - `_dbg\` 파일: `session.json`(세션 메타), `recovery.json`(격리 마커), `sync.json`(지문 캐시),
@@ -123,19 +124,21 @@ pull은 `--force`를 요구한다.
 
 | 아티팩트 | 관리 방식 |
 |---|---|
-| `vbaloop.toml` | 없으면 루트의 유일한 `*.xlsm`으로 스캐폴드. 사용자 파일이라 덮어쓰지 않는다 |
+| `vbaloop.toml` | 없으면 루트의 유일한 `*.xlsm`으로 스캐폴드. 사용자 파일이라 덮어쓰지 않고 `[vbaloop] managed_by` 한 줄만 관리한다(§12) |
 | `src\LogShim.bas` | 정본 사본(통째 관리) |
 | `CLAUDE.md`, `AGENTS.md` | `<!-- vbaloop:managed:start/end -->` 블록만 관리 |
 | `.claude\skills\vbaloop\` | 스킬과 참조 문서(통째 관리) |
 | `.gitignore` | `# vbaloop:managed` 블록(`_dbg/`, `dist/`) |
 
-정본은 exe에 임베드돼 있어 설치본만으로 온보딩할 수 있다. `--all`은 소스 레포 옆의 프로젝트들을 일괄 수렴한다.
+정본은 exe에 임베드돼 있어 설치본만으로 온보딩할 수 있다. `--all`은 프로젝트들을 일괄 수렴한다(대상은 §12.6).
+exe가 프로젝트의 관리 스탬프보다 오래되면 init은 아무것도 쓰지 않고 거부한다(§12.2).
 
 ### lint / bugreport / version / setup
 - `lint`: 인코딩·규약·헤더·VB_Name·frm/frx 짝 전수 검사. Excel이 필요 없다.
 - `bugreport`: 결함 리포트 템플릿을 만든다. 소스 레포에서는 `docs\bugreports\`, 설치본에서는 `_dbg\bugreports\`
   + GitHub 이슈 링크.
-- `version`: semver + git 리비전 + 빌드 시각.
+- `version`: semver + git 리비전 + 빌드 시각(§12.1).
+- `update`: 최신 릴리스로 설치본 교체 후 init --all 여부 확인(§12.5).
 - `setup`: §10.
 
 ## 5. `vbaloop.toml`
@@ -163,6 +166,9 @@ stripComments = false
 
 [backup]                      # 선택
 keep = 10
+
+[vbaloop]                     # init이 기록(§12.2) - 직접 수정 금지
+managed_by = "0.3.0"
 ```
 
 cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프로젝트 루트다. 파서는 지원하는 부분집합
@@ -310,3 +316,103 @@ stale로 취급하지 않는다.
 - `stop`은 분리만 한다.
 - poison·타임아웃은 항상 격리한다.
 - read-only로 열려 있거나 여러 인스턴스에 열려 있으면 거부한다.
+
+## 12. 버전 드리프트 방지
+
+exe는 PC마다 한 번 설치되고(`%LOCALAPPDATA%\vbaloop\bin`), 관리 파일은 프로젝트 레포마다 벤더링된다.
+그래서 "이 PC의 exe"와 "이 레포의 관리 파일"의 버전이 어긋날 수 있다. 정확성은 로컬·오프라인 판정(스탬프)이
+맡고, 네트워크 업데이트 알림은 편의로 그 뒤에 둔다. 스탬프 거부가 이미 갱신을 지시하므로 필수 갱신에는
+네트워크가 필요 없다.
+
+### 12.1 exe 버전
+- 릴리스는 태그에서 `-p:Version`을 주입한다. 로컬·CI 빌드는 `StampGitRevision`이 마지막 `v*` 태그에서
+  유도한다(`v0.3.0` + 5커밋 = 버전 `0.3.0`). 커밋 수와 `-dirty`는 리비전(`v0.3.0-5-gabc1234-dirty`)에만
+  남는다. git이나 semver 태그가 없으면 `0.1.0` / `nogit`.
+- repo 빌드 exe가 `0.1.0`으로 비교되면 모든 프로젝트에서 거부되거나 스탬프를 끌어내리므로, 비교 단위는 반드시
+  태그 기반 semver다. 비교는 semver 2.0 우선순위(prerelease < 같은 번호의 정식, 빌드 메타데이터 무시).
+
+### 12.2 관리 스탬프 `[vbaloop] managed_by`
+관리 파일(CLAUDE.md/AGENTS.md 관리 블록, `.claude\skills\vbaloop\`, `.gitignore` 블록, `src\LogShim.bas`)을
+마지막으로 쓴 exe 버전. init(과 init을 부르는 setup)만 기록한다. toml은 사용자 파일이라 이 한 줄만 라인 단위로
+upsert하고 나머지는 보존한다.
+
+| exe vs 스탬프 | init | init --check |
+|---|---|---|
+| 스탬프 없음 | 수렴 + 스탬프 기록 | toml을 드리프트로 보고(exit 2) |
+| exe = 스탬프 | 수렴 | 일반 검사 |
+| exe > 스탬프 | 수렴. 관리 파일을 실제로 쓸 때만 스탬프를 올린다 | 일반 검사(관리 파일이 같으면 ok) |
+| exe < 스탬프 | **아무것도 쓰지 않음**, exit 3, hint `vbaloop update` | `state: "exe-older"`, exit 3 |
+| 스탬프가 semver 아님 | 거부, exit 2 | `state: "invalid"`, exit 2 |
+
+- 스탬프는 내려가지 않는다. 더 오래된 exe는 쓰기 자체를 거부하고, 쓰는 경로도 낮은 값으로는 기록하지 않는다.
+- exe가 더 새로워도 관리 파일이 같으면 toml을 건드리지 않는다. exe 갱신만으로 모든 레포에 diff가 생기는
+  churn을 피하기 위해서다. 같은 정본을 가진 사이 버전 exe는 그대로 수렴할 수 있고, 정본이 바뀌는 순간
+  스탬프가 오른다.
+- 스탬프는 목록의 첫 항목으로 먼저 기록된다. 중간에 쓰기가 실패해도 스탬프가 파일보다 낮게 남지 않는다.
+- exe-older에서는 아티팩트를 비교하지 않는다(`artifacts: []`). 더 새 정본과의 바이트 차이는 드리프트가 아니고,
+  그것을 고치라는 신호가 곧 다운그레이드이기 때문이다. 관리 스킬과 CLAUDE.md 블록은 에이전트에게 이 상태를
+  init으로 고치지 말고(스탬프 수정·삭제 포함) 사용자에게 `vbaloop update`를 요청하라고 지시한다.
+- `init --all`도 프로젝트마다 같은 규칙이다. 거부된 프로젝트는 `[REFUSED]`로 보고하고 나머지는 계속 수렴한다.
+  하나라도 거부되면 exit 3.
+- 스탬프 판독은 TomlMini가 아니라 라인 스캔이다. 미래 exe가 이 exe가 모르는 toml 문법·섹션을 써도 스탬프는
+  읽혀야 "exe가 오래됨"을 정확히 말할 수 있다. 같은 이유로 `[vbaloop]` 섹션의 미지 키는 거부하지 않고, 다른
+  섹션의 미지 키·섹션이라도 스탬프가 exe보다 새로우면 오류를 exe-older(exit 3, `vbaloop update`)로 바꿔 보고한다.
+- 스탬프 도입 이전 exe(`[vbaloop]` 섹션을 모름)는 스탬프된 프로젝트에서 모든 명령이 "미지 섹션"으로 실패한다.
+  이 exe들은 init도 실패하므로 스탬프된 프로젝트를 다운그레이드할 수 없다. 해결은 exe 갱신이다.
+
+### 12.3 다른 명령의 경고
+push/test/pull/run 등 프로젝트를 읽는 명령은 exe-older여도 막지 않고 stderr에 경고 한 줄만 낸다
+(`--json`에서도 stdout 봉투는 그대로). 근거: 이 명령들은 관리 파일을 쓰지 않아 다운그레이드를 일으키지 않고,
+새 exe는 옛 LogShim 레코드를 계속 읽는다(LogShim 형식은 이번 변경에서 바뀌지 않았다 - 형식을 바꿀 때는
+LogShim에 버전 상수를 두고 test가 옛 워크북 LogShim을 감지해 "push 필요"로 멈춰야 한다). 루프를 세울 이유는
+없지만 사람이 알아야 하므로 경고한다. `status`는 `managed`(by/exe/state) 필드와 한 줄을, `doctor`는
+`project.managedBy` 점검(exe-older면 FAIL, hint `vbaloop update`)을 보여 준다.
+
+### 12.4 새 릴리스 알림
+- 명령은 캐시 `%LOCALAPPDATA%\vbaloop\update.json`(`checkedAt`, `latest`, 실패 시 `error`)만 읽는다. 캐시가
+  24시간보다 오래됐으면 분리된 자식 `vbaloop __update-check`를 띄우고 바로 진행한다. 자식은 GitHub
+  `releases/latest`(rfastball/vbaloop)를 3초 제한으로 조회해 캐시를 쓴다. 명령 자체에는 지연이 없고, 결과는 다음
+  명령부터 보인다.
+- 자식은 핸들을 상속하지 않고 창 없이 뜬다(CreateProcessW, bInheritHandles=false). `Process.Start`는 항상 핸들을
+  상속시켜, 호출자가 읽는 stdout 파이프가 자식이 끝날 때까지 열린 채로 남기 때문이다.
+- 조회가 실패해도(오프라인, 정식 릴리스 없음 404) `checkedAt`을 기록한다. 명령마다 자식이 뜨지 않게 하기 위해서다.
+  동시에 뜬 자식은 뮤텍스로 하나만 조회한다.
+- 건너뛰는 경우: repo 빌드 exe(RepoLocator가 VbaLoop.sln을 찾음, 갱신 경로는 rollout.ps1), CI(`CI`,
+  `GITHUB_ACTIONS`, `TF_BUILD`), `VBALOOP_NO_UPDATE_CHECK=1`.
+- 알림은 `status`, `doctor`, `version`, `init --check`에서만 낸다. 캐시 확인·자식 기동도 이 명령들에서만 한다.
+  편집 루프의 hot path(push/test/run)는 그대로 둔다. 에이전트 루프는 시작할 때 `init --check`를 부르므로
+  알림이 전달된다.
+- 판정: `latest > current`. 단 정식 버전 사용자에게 prerelease는 알리지 않는다(releases/latest가 원래 주지 않지만
+  캐시를 손댄 경우까지 막는다). prerelease 사용자에게 같은 번호의 정식 릴리스는 알린다.
+- 출력: `--json`이면 봉투의 `update` 필드, 사람용이면 stderr 한 줄. stdout을 파싱하는 호출자를 깨지 않는다.
+- 필수 갱신은 이 알림에 의존하지 않는다. exe가 오래되면 §12.2 스탬프가 오프라인으로 init을 막고 `vbaloop update`를
+  지시한다.
+
+### 12.5 `vbaloop update`
+- install.ps1과 같은 계약이다. `releases/latest`의 `vbaloop.exe`를 받아 같은 릴리스의 `checksums.txt`의 SHA-256과
+  대조하고, 자산이나 체크섬 항목이 없거나 값이 다르면 설치하지 않는다(fail closed).
+- 대상은 설치본 `%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe`다. 실행 중일 수 있으므로 지우지 않고 `vbaloop.exe.old`로
+  이름을 바꾼 뒤 새 exe를 복사한다(이전 `.old`가 아직 실행 중이면 `vbaloop.exe.<8hex>.old`). 복사에 실패하면 원래
+  이름으로 되돌린다. `.old`는 설치 폴더에서 기동하는 다음 명령이 best-effort로 지운다. PATH 등록도 확인한다.
+- 비교 기준은 설치본 버전이다. 실행 exe가 설치본이면 자기 버전을, 아니면 설치본에 `version --json`을 물어 쓴다.
+  최신과 같거나 높으면 아무것도 하지 않는다(`--force`는 그래도 설치). `--check`는 확인만 한다. 정식 릴리스가 없으면
+  (404) "갱신할 것이 없음"으로 성공한다.
+- 교체 뒤 관리 파일 수렴은 **새 exe**가 한다. 이 프로세스의 임베디드 정본은 옛 버전이기 때문이다. 대화형이면
+  `init --all`을 실행할지 묻고, `--yes`면 묻지 않고 실행한다. 비대화형이거나 `--json`인데 `--yes`가 없으면 실행하지
+  않고 `payload.next`로 안내한다. `--json`이면 자식의 봉투를 `payload.initAll`에 담는다.
+- 성공한 조회는 알림 캐시도 갱신한다.
+
+### 12.6 프로젝트 레지스트리와 `init --all`
+- 설치본 exe는 소스 레포 옆에 있지 않아 형제 탐색으로 프로젝트를 찾을 수 없다. 그래서 사용자 단위 목록
+  `%LOCALAPPDATA%\vbaloop\projects.json`(`projects[]: {root, addedAt}`)을 둔다.
+- 프로젝트 설정을 읽는 모든 명령(ProjectConfig.Load 성공, init의 스캐폴드 포함)이 그 루트가 없을 때만 추가한다.
+  이미 있으면 파일을 쓰지 않는다. 쓰기는 네임드 뮤텍스(`Local\vbaloop-project-registry`)로 직렬화하고 임시 파일 +
+  원자적 이동으로 기록한다(excel-pids.json과 같은 방식). 실패해도 명령은 계속된다.
+- `init --all` 대상: exe가 소스 레포 아래에 있으면 형제 toml 프로젝트 + `_pilot_form`(기존 동작) ∪ 레지스트리,
+  설치본이면 레지스트리만. 같은 루트는 대소문자·끝 구분자를 무시하고 하나로 합친다. 대상이 없으면 exit 2.
+- 폴더나 `vbaloop.toml`이 사라진 레지스트리 항목은 `[GONE]`으로 보고하고 지운다(`--check`는 보고만).
+  `payload.gone`.
+- LogShim.bas가 바뀐 프로젝트는 워크북에 반영하려면 각자 `vbaloop push`가 필요하다. 이름을 모아 보고한다
+  (`payload.needsPush`). init은 Excel 없이 파일만 다루므로 push를 대신하지 않는다.
+- rollout.ps1(test → publish → `setup --install-only` → `init --all`)은 repo 빌드 exe로 돌기 때문에 형제 탐색이
+  그대로 동작하고, 레지스트리의 다른 위치 프로젝트까지 함께 수렴한다.

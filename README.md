@@ -178,7 +178,7 @@ End Sub
 | 명령 | 설명 |
 |---|---|
 | `setup [--workbook <xlsm> \| --new <이름> \| --folder <경로>] [--plan] [--enable-vbom]` | 프로젝트 세팅 마법사. 질문을 하는 유일한 명령이다. `--plan`은 바꾸지 않고 계획만 보여준다 |
-| `init [--check]` | 관리 파일(규칙 블록, 스킬, `LogShim.bas`) 설치·갱신. `--check`는 검사만 한다 |
+| `init [--check] [--all]` | 관리 파일(규칙 블록, 스킬, `LogShim.bas`) 설치·갱신. `--check`는 검사만 하고, `--all`은 이 PC에서 쓴 프로젝트 전부를 갱신한다 |
 | `doctor [--fix] [--kill-orphans]` | 환경 점검. `--fix`는 AccessVBOM을 켜고, `--kill-orphans`는 창 없이 남은 자동화 Excel을 정리한다(먼저 `doctor`로 대상 확인) |
 | `status` | 세션 상태, src가 워크북에 반영됐는지 |
 | `session start\|attach\|stop` | 계속 띄워 두는 Excel 세션 시작, 이미 열린 워크북 채택, 종료(`--no-save`, `--discard`) |
@@ -194,8 +194,10 @@ End Sub
 | `lease acquire\|release\|status\|break` | 여러 에이전트가 한 프로젝트를 동시에 쓰지 않게 하는 잠금(보통 자동) |
 | `bugreport "<제목>"` | vbaloop 결함 리포트 작성 |
 | `version` | 버전과 빌드 정보 |
+| `update [--check] [--yes]` | 최신 릴리스로 vbaloop 갱신(SHA-256 확인). 끝나면 `init --all` 실행 여부를 묻는다 |
 
-- 모든 명령은 `--json`을 지원한다: `{command, ok, exitCode, hint, session, errors[], payload}`
+- 모든 명령은 `--json`을 지원한다: `{command, ok, exitCode, hint, session, errors[], payload}`.
+  새 버전 알림이 있으면 `update: {current, latest, command}`가 덧붙는다
 - 실패하면 한 줄 에러와 다음에 할 일(`hint`)을 알려 준다.
 - 종료 코드: 성공 0 / 환경 오류 3(세션·Excel 문제, 사용 중, 격리) / 그 외 2
 
@@ -225,7 +227,24 @@ exclude = ["Test_*"]
 
 [backup]                  # 선택
 keep = 10                 # 0이면 push 전 백업 끔
+
+[vbaloop]                 # init이 기록한다. 직접 고치지 않는다
+managed_by = "0.3.0"      # 관리 파일을 마지막으로 쓴 vbaloop 버전
 ```
+
+## 업데이트
+
+vbaloop.exe는 PC에 한 번 설치되고, 관리 파일(`CLAUDE.md` 블록, 스킬, `LogShim.bas`)은 프로젝트마다 들어 있다.
+둘의 버전이 어긋나지 않게 다음 규칙을 따른다.
+
+- **새 버전 알림**: `status`, `doctor`, `version`, `init --check`가 새 릴리스를 알려 준다. 확인은 하루 한 번
+  백그라운드에서 하므로 명령이 느려지지 않는다. 끄려면 `$env:VBALOOP_NO_UPDATE_CHECK=1`.
+- **갱신**: `vbaloop update`. 새 exe를 받아 SHA-256을 확인하고 바꾼 뒤, 이 PC에서 쓴 프로젝트 전부에
+  `init --all`을 돌릴지 묻는다(`--yes`면 묻지 않고 실행). `LogShim.bas`가 바뀐 프로젝트는 목록으로 알려 주며,
+  각 프로젝트에서 `vbaloop push`를 한 번 하면 된다.
+- **exe가 프로젝트보다 오래된 경우**: `vbaloop.toml`의 `managed_by`가 exe 버전보다 높으면 `init`은 아무것도
+  바꾸지 않고 `vbaloop update`를 안내한다(종료 코드 3). 다른 PC에서 더 새 vbaloop로 작업한 레포를 받았을 때
+  오래된 exe가 관리 파일을 되돌리지 않게 하기 위해서다. push/test는 경고만 하고 그대로 동작한다.
 
 ## 제약
 
@@ -242,6 +261,7 @@ keep = 10                 # 0이면 push 전 백업 끔
 vbaloop가 PC에 바꾸는 것은 셋이다: Excel의 "VBA 프로젝트 개체 모델에 대한 신뢰할 수 있는 액세스"(AccessVBOM),
 `%LOCALAPPDATA%\vbaloop\bin` 설치와 사용자 PATH 등록, 프로젝트 폴더의 관리 파일. AccessVBOM은 마법사에서 동의하거나
 `--enable-vbom`을 명시해야만 바뀌고, 무엇이 바뀌는지는 `setup --plan`으로 미리 볼 수 있다. 원본 워크북은 수정하지 않는다.
+네트워크는 하루 한 번 GitHub에 최신 릴리스 번호를 묻는 것과 `vbaloop update`의 다운로드뿐이고, 코드나 워크북은 보내지 않는다.
 자세한 내용과 되돌리는 방법, 취약점 제보는 [SECURITY.md](SECURITY.md),
 포함된 제3자 코드는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있다.
 
