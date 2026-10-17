@@ -39,6 +39,8 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 - exit code: 성공 0 / 환경 오류 3 (세션 부재·stale·오염, Excel/COM 치명, busy, 격리 - hint를 따른다) / 그 외 2
 - 실패 시 `hint`가 다음 행동을 지시한다. hint를 따르는 것이 항상 최우선이다
 - 상태를 기억하거나 추론하지 말 것 - "재검증 필요 여부"는 도구가 판단한다(해시 캐시, 멱등 start)
+- 봉투에 `update: {current, latest, command}`가 있으면 새 vbaloop 릴리스가 있다는 알림일 뿐이다(ok/hint와 무관).
+  작업을 끝낸 뒤 사용자에게 알린다. `vbaloop update`는 PC의 exe를 바꾸므로 사용자가 원할 때만 실행한다
 
 ## 표준 루프
 

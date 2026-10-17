@@ -70,6 +70,8 @@ public static class InitCommand
         }
 
         var results = Onboarding.Apply(items);
+        if (tomlPath == null)
+            ProjectConfig.Load(items[0].Path, root); // 방금 스캐폴드한 toml 검증 + 로드 훅(프로젝트 레지스트리 등록)
         foreach (var (item, action) in results)
             o.HumanLines.Add($"[{ActionLabel(action)}] {item.Name}"
                 + (action != ArtifactAction.Unchanged && item.Detail != null ? $" ({item.Detail})" : ""));
@@ -96,22 +98,48 @@ public static class InitCommand
     }
 
     /// <summary>
-    /// --all: 온보딩된 전 프로젝트 일괄 수렴 (rollout.ps1의 3단계). exe 위치에서 레포를 찾아
-    /// 형제 toml 프로젝트 + _pilot_form을 순회한다. 한 프로젝트 실패(깨진 toml 등)는 기록 후
-    /// 계속 — 하나가 나머지 수렴을 인질 잡지 않는다. 실패/드리프트 존재 시 exit 2.
-    /// toml 없는 폴더는 열거 자체가 제외하므로 여기서 스캐폴드는 일어나지 않는다.
+    /// --all: 온보딩된 전 프로젝트 일괄 수렴 (rollout.ps1의 4단계, vbaloop update 뒤). 대상은 exe가 소스 레포
+    /// 아래에 있으면 형제 toml 프로젝트 + _pilot_form(RepoLocator) ∪ 사용자 프로젝트 레지스트리, 설치본이면
+    /// 레지스트리만(설계 §12.6). 레지스트리에서 폴더나 vbaloop.toml이 사라진 항목은 [GONE]으로 보고하고
+    /// 지운다(--check는 보고만). 한 프로젝트 실패(깨진 toml 등)는 기록 후 계속 — 하나가 나머지 수렴을
+    /// 인질 잡지 않는다. 실패/드리프트 존재 시 exit 2.
+    /// toml 없는 폴더는 대상이 아니므로 여기서 스캐폴드는 일어나지 않는다.
     /// 관리 스탬프가 exe보다 새로운 프로젝트는 건너뛰고 [REFUSED]로 보고한다(exit 3, hint vbaloop update).
+    /// LogShim.bas가 바뀐 프로젝트는 push가 필요하므로 이름을 모아 보고한다(payload.needsPush).
     /// </summary>
     private static Outcome RunAll(CliArgs opts)
     {
         var o = new Outcome { Command = "init" };
         var exeDir = Environment.ProcessPath != null
             ? Path.GetDirectoryName(Environment.ProcessPath)! : Environment.CurrentDirectory;
-        var repoRoot = RepoLocator.FindRepoRoot(exeDir)
-            ?? throw new CliError("--all은 vbaloop 레포 아래의 exe에서만 동작 (VbaLoop.sln 상향 탐색 실패)",
-                @"vbaloop에서 .\rollout.ps1 실행 (test -> publish -> init --all)");
-        var projectsRoot = Path.GetDirectoryName(repoRoot)!;
-        var projects = RepoLocator.EnumerateOnboardedProjects(projectsRoot, repoRoot);
+        var repoRoot = RepoLocator.FindRepoRoot(exeDir);
+        string? projectsRoot = repoRoot != null ? Path.GetDirectoryName(repoRoot)! : null;
+        var siblings = repoRoot != null
+            ? RepoLocator.EnumerateOnboardedProjects(projectsRoot!, repoRoot)
+            : new List<(string Name, string Root)>();
+
+        var registryPath = ProjectRegistry.DefaultPath;
+        List<string> registryRoots, gone;
+        if (opts.Check)
+        {
+            var (kept, removed) = ProjectRegistry.Prune(ProjectRegistry.Load(registryPath), ProjectRegistry.IsProject);
+            (registryRoots, gone) = (kept.Select(e => e.Root).ToList(), removed.Select(e => e.Root).ToList());
+        }
+        else
+        {
+            (registryRoots, gone) = ProjectRegistry.PruneFile(registryPath);
+        }
+        foreach (var g in gone)
+            o.HumanLines.Add($"[GONE]    {g} (폴더 또는 vbaloop.toml 없음 - 목록에서 {(opts.Check ? "제거 예정" : "제거")})");
+
+        var projects = ProjectRegistry.Union(siblings, registryRoots);
+        if (projects.Count == 0)
+        {
+            o.Payload = new { mode = opts.Check ? "all-check" : "all", projectsRoot, registry = registryPath, gone, projects = Array.Empty<object>() };
+            o.Fail("init --all 대상 프로젝트가 없음",
+                "프로젝트 폴더에서 vbaloop init(또는 아무 프로젝트 명령)을 한 번 실행하면 목록에 등록됨");
+            return o;
+        }
 
         var shimLines = LoadAssetLines("VbaLoop.assets.LogShim.bas");
         var docsBody = LoadAssetLines("VbaLoop.assets.AgentDocsBlock.md");
@@ -121,7 +149,8 @@ public static class InitCommand
 
         var exe = ExeVersion.Current;
         var rows = new List<object>();
-        int failed = 0, drifted = 0, shimUpdated = 0, refused = 0;
+        var needsPush = new List<string>();
+        int failed = 0, drifted = 0, refused = 0;
         foreach (var (name, root) in projects)
         {
             var tomlPath = ProjectConfig.FindTomlPath(Path.Combine(root, "vbaloop.toml"), root);
@@ -159,7 +188,7 @@ public static class InitCommand
                     int unchanged = results.Count(r => r.Action == ArtifactAction.Unchanged);
                     if (results.Any(r => r.Action != ArtifactAction.Unchanged
                             && r.Item.Path.EndsWith("LogShim.bas", StringComparison.OrdinalIgnoreCase)))
-                        shimUpdated++;
+                        needsPush.Add(name);
                     o.HumanLines.Add(created + overwritten == 0
                         ? $"[ok]      {name} (unchanged {unchanged})"
                         : $"[UPDATED] {name} (created {created}, overwritten {overwritten}, unchanged {unchanged})");
@@ -173,10 +202,19 @@ public static class InitCommand
                 rows.Add(new { name, root, ok = false, error = (string?)e.Message });
             }
         }
-        if (shimUpdated > 0)
-            o.HumanLines.Add($"LogShim.bas 갱신 {shimUpdated}건 - 각 프로젝트의 다음 push에서 워크북 반영 필요");
+        if (needsPush.Count > 0)
+            o.HumanLines.Add($"LogShim.bas 갱신 {needsPush.Count}건 - 각 프로젝트에서 vbaloop push 필요: {string.Join(", ", needsPush)}");
 
-        o.Payload = new { mode = opts.Check ? "all-check" : "all", projectsRoot, exeVersion = ExeVersion.Text, projects = rows };
+        o.Payload = new
+        {
+            mode = opts.Check ? "all-check" : "all",
+            projectsRoot,
+            registry = registryPath,
+            exeVersion = ExeVersion.Text,
+            projects = rows,
+            gone,
+            needsPush,
+        };
         if (failed > 0)
             o.Fail($"프로젝트 {failed}건 수렴 실패", "위 [FAIL] 라인의 원인 해결 후 재실행");
         if (refused > 0)
