@@ -65,6 +65,11 @@ internal static class Program
         if (verb == "__probe")
             return Excel.SessionProbe.RunChild(opts);
 
+        // 프로젝트를 읽는 명령의 부수 신호(설계 §12.3): 관리 스탬프가 이 exe보다 새로우면 경고만 한다.
+        // 쓰기(init)는 자체적으로 거부하고, push/test 등은 막지 않는다 - 원인은 exe라 루프를 세울 이유가 없다.
+        var warnings = new List<string>();
+        ProjectConfig.Loaded = cfg => OnProjectLoaded(cfg, warnings);
+
         var outcome = new Outcome { Command = verb };
         try
         {
@@ -104,6 +109,8 @@ internal static class Program
         // 균일하게 봉투를 유지하도록 rawJson을 폴백으로 OR (xlFlow a.json || rawArgsRequestJSON)
         // 출력이 RCW 정리보다 먼저다: 격리된(VBA 실행 중) Excel의 프록시 Release는 무기한 블록할 수 있다.
         Output.Print(outcome, opts.Json || rawJson);
+        foreach (var w in warnings)
+            Console.Error.WriteLine($"vbaloop {verb}: warning: {w}");
 
         // 격리·busy로 응답 없는 Excel의 RCW를 쥐고 있으면 그 프록시 Release가 무기한 블록한다. 주 STA
         // 스레드는 어떤 대기에서든 COM을 펌프해 그 호출을 받으므로 시간 제한도 무력하다(런타임 실측
@@ -116,6 +123,13 @@ internal static class Program
         if (!ComCleanup.Run(TimeSpan.FromSeconds(5)))
             ComCleanup.HardExit(outcome.ExitCode);
         return outcome.ExitCode;
+    }
+
+    private static void OnProjectLoaded(ProjectConfig cfg, List<string> warnings)
+    {
+        if (ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy) != StampState.ExeOlder) return;
+        var w = $"{ManagedStamp.DescribeExeOlder(cfg.ManagedBy!, ExeVersion.Text)} - {ManagedStamp.UpdateHint} 권장 (init은 거부됨)";
+        if (!warnings.Contains(w)) warnings.Add(w);
     }
 
     /// <summary>

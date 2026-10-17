@@ -255,7 +255,8 @@ public static class SetupCommand
             foreach (var line in initOut.HumanLines) Say($"  {line}");
             if (!initOut.Ok)
             {
-                o.Fail("온보딩(init) 실패: " + string.Join("; ", initOut.Errors), initOut.Hint);
+                o.Fail("온보딩(init) 실패: " + string.Join("; ", initOut.Errors), initOut.Hint,
+                    initOut.EnvironmentError); // exe-older 거부(exit 3, hint vbaloop update)를 보존
                 return o;
             }
 

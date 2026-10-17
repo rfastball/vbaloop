@@ -117,6 +117,21 @@ public static class DoctorCommand
             // doctor는 프로젝트 밖에서도 동작해야 함 — 프로젝트 의존 체크만 생략
         }
 
+        // 5b'. 관리 스탬프(설계 §12) — exe가 프로젝트보다 오래됐으면 실패 항목(해결: vbaloop update)
+        if (cfg != null)
+        {
+            var stampState = ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy);
+            checks.Add(new Check("project.managedBy", stampState is not (StampState.ExeOlder or StampState.Invalid),
+                StatusCommand.DescribeStamp(cfg.ManagedBy, stampState),
+                stampState switch
+                {
+                    StampState.ExeOlder => ManagedStamp.UpdateHint,
+                    StampState.Unstamped => "vbaloop init (스탬프 기록)",
+                    StampState.Invalid => "vbaloop.toml의 managed_by 줄 확인",
+                    _ => null,
+                }));
+        }
+
         // 5c. 격리 마커(설계 §11) — 정보성. 격리 PID는 아래 고아 정리에서 절대 제외된다.
         RecoveryMarker? marker = cfg != null ? RecoveryMarker.Load(cfg.RecoveryMarkerPath) : null;
         if (cfg != null)
@@ -144,7 +159,7 @@ public static class DoctorCommand
             checks.Add(CheckWorkbookLock(cfg, meta, orphans));
 
         bool allOk = checks.Where(c => c.Name is "excel.com" or "excel.accessVBOM" or "attach.oleacc"
-                                       or "workbook.lock")
+                                       or "workbook.lock" or "project.managedBy")
                            .All(c => c.Ok);
         o.Ok = allOk;
         foreach (var c in checks)

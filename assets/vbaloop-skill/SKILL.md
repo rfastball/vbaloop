@@ -16,6 +16,7 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 
 | 증상 | 조치 |
 |------|------|
+| `init --check`가 exit 3 + `payload.state: "exe-older"` (또는 경고 "exe는 ...으로 더 오래됨") | **init 실행 금지**, 사용자에게 `vbaloop update` 요청 -> §exe가 프로젝트보다 오래됨 |
 | 세션 없음/stale/오염 (exit 3) | auto-ensure가 정리+재기동. 반복 시 `doctor` -> §세션 poisoned/stale |
 | 세션 격리 (exit 3, hint에 `recovery clear`/`--discard`) | 스스로 kill 금지, 사용자에게 알림 -> §세션 격리 |
 | busy (exit 3, "셀 편집/대화상자") | 잠시 후 같은 명령 재시도 -> §세션 격리 |
@@ -41,7 +42,8 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 
 ## 표준 루프
 
-1. `vbaloop init --check --json` - 온보딩/드리프트 검사. 비정상(exit 2)이면 `vbaloop init`으로 수렴 후 진행
+1. `vbaloop init --check --json` - 온보딩/드리프트 검사. 드리프트(exit 2)면 `vbaloop init`으로 수렴 후 진행.
+   exit 3 + `payload.state: "exe-older"`면 init을 부르지 말고 멈춘다(§exe가 프로젝트보다 오래됨)
 2. src\*.bas/.cls/.frm 편집
 3. `vbaloop push --json` - 미변경이면 no-op. 실패 시 errors에 파일:라인 인라인(예: CP949 불가 문자)
 4. `vbaloop test --json` - payload.tests[].detail에 실패 어서션(expected/actual)이 인라인됨
@@ -56,6 +58,17 @@ vbaloop는 src 텍스트 파일과 Excel 워크북 VBA를 안전하게 왕복시
 테스트는 `Public Sub Test_*()`(인자 없음)만 수집된다. 단언은 `LogShim.AssertEq`.
 
 ## 실패 플레이북
+
+### exe가 프로젝트보다 오래됨 (exe-older)
+
+- `vbaloop.toml`의 `[vbaloop] managed_by`는 관리 파일을 마지막으로 쓴 vbaloop 버전이다. 실행 exe가
+  그보다 오래되면 init(과 init --check)은 exit 3 + `payload.state: "exe-older"`, hint `vbaloop update`로
+  거부한다. 이건 드리프트가 아니다 - 오래된 exe의 정본으로 "수렴"하면 프로젝트가 다운그레이드된다
+- **에이전트가 고치지 말 것**: `vbaloop init`을 재시도하거나, managed_by 줄을 지우거나 고치거나,
+  관리 파일을 손으로 되돌리지 않는다. 사용자에게 상황(managedBy와 exeVersion)을 알리고
+  `vbaloop update`(새 exe 설치) 실행을 요청한다. 갱신 후 다시 `init --check`부터
+- push/test 등은 막히지 않고 stderr에 같은 경고만 낸다. 루프는 계속할 수 있지만 사용자에게 알린다
+- `managed_by` 값이 semver가 아니면(exit 2, `state: "invalid"`) 사용자에게 toml 확인을 요청한다
 
 ### 세션 poisoned / stale
 

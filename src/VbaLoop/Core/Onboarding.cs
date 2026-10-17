@@ -6,6 +6,9 @@ public enum ArtifactAction { Created, Overwritten, Unchanged }
 /// <summary>
 /// init(온보딩 부트스트래퍼)의 순수 로직 (v1.1). 관리 아티팩트 8종을
 /// toml -> shim -> CLAUDE.md -> AGENTS.md -> 스킬 -> pitfall 참조 -> dist 참조 -> .gitignore 순으로 분석/수렴한다.
+/// toml은 관리 스탬프([vbaloop] managed_by, 설계 §12)만 라인 단위로 갱신한다 — 다른 아티팩트를 쓰거나
+/// 스탬프가 없을 때. toml이 목록 첫 항목이라 스탬프가 먼저 기록된다(중간 실패 시에도 스탬프가 파일보다
+/// 낮게 남지 않아 더 오래된 exe의 다운그레이드를 막는 쪽으로 실패한다).
 /// Analyze가 기록할 내용까지 전부 준비하므로(추론 실패 시 여기서 throw)
 /// Apply는 부분 실행 없이 쓰기만 한다. Excel/세션 불필요.
 /// </summary>
@@ -18,36 +21,41 @@ public static class Onboarding
         public required ArtifactStatus Status { get; init; }
         /// <summary>Status != Ok일 때 기록할 전체 텍스트(UTF-8 BOM 없음).</summary>
         public string? NewContent { get; init; }
+        /// <summary>사람용 부가 설명(예: toml 스탬프 변경 "managed_by 0.2.0 -> 0.3.0").</summary>
+        public string? Detail { get; init; }
     }
 
     /// <summary>8종 아티팩트 상태 + 기록 내용 준비. tomlPath가 null이면 워크북 추론으로
     /// 스캐폴드를 준비하고, 추론 불가(0개/복수)면 CliError. 기존 toml 파싱 실패도 CliError
-    /// (사용자 소유 파일은 절대 덮어쓰지 않으므로 수렴 불가 = 에러).</summary>
+    /// (사용자 소유 파일은 절대 덮어쓰지 않으므로 수렴 불가 = 에러).
+    /// stampVersion: 관리 파일을 쓸 때 기록할 exe 버전(null이면 스탬프를 다루지 않음). 호출자가
+    /// ManagedStamp.AllowsWrite를 먼저 확인한다 — 여기서도 스탬프를 내리는 쓰기는 만들지 않는다.</summary>
     public static List<Item> Analyze(string root, string? tomlPath,
         IReadOnlyList<string> shimCanonicalLines, IReadOnlyList<string> docsBodyLines,
         IReadOnlyList<string> skillCanonicalLines, IReadOnlyList<string> pitfallsCanonicalLines,
-        IReadOnlyList<string> distCanonicalLines)
+        IReadOnlyList<string> distCanonicalLines, string? stampVersion = null)
     {
         var items = new List<Item>();
         string srcRoot;
+        Item? scaffold = null;
 
         if (tomlPath != null)
         {
             var cfg = ProjectConfig.Load(tomlPath, root); // 파싱/스키마 검증, 실패 시 CliError 전파
             srcRoot = cfg.SrcRoot;
-            items.Add(new Item { Name = "vbaloop.toml", Path = tomlPath, Status = ArtifactStatus.Ok });
         }
         else
         {
             srcRoot = System.IO.Path.Combine(root, "src");
             var workbook = InferWorkbook(root);
-            items.Add(new Item
+            var content = BuildTomlScaffold(new DirectoryInfo(root).Name, workbook);
+            scaffold = new Item
             {
                 Name = "vbaloop.toml",
                 Path = System.IO.Path.Combine(root, "vbaloop.toml"),
                 Status = ArtifactStatus.Missing,
-                NewContent = BuildTomlScaffold(new DirectoryInfo(root).Name, workbook),
-            });
+                NewContent = stampVersion != null ? ManagedStamp.Upsert(content, stampVersion) : content,
+            };
         }
 
         var shimPath = System.IO.Path.Combine(srcRoot, "LogShim.bas");
@@ -139,7 +147,32 @@ public static class Onboarding
             NewContent = gitignoreStatus == ArtifactStatus.Ok ? null : gitignoreText,
         });
 
+        items.Insert(0, scaffold ?? AnalyzeTomlStamp(tomlPath!, stampVersion,
+            othersChange: items.Any(i => i.Status != ArtifactStatus.Ok)));
         return items;
+    }
+
+    /// <summary>기존 toml의 스탬프 항목: 스탬프가 없으면 기록, exe가 더 새롭고 다른 관리 파일을 쓸 때만 올린다
+    /// (바뀐 게 없는데 exe 갱신만으로 toml을 건드리는 churn을 피한다). 스탬프는 절대 내리지 않는다.</summary>
+    private static Item AnalyzeTomlStamp(string tomlPath, string? stampVersion, bool othersChange)
+    {
+        var ok = new Item { Name = "vbaloop.toml", Path = tomlPath, Status = ArtifactStatus.Ok };
+        if (stampVersion == null) return ok;
+        var text = File.ReadAllText(tomlPath);
+        var existing = ManagedStamp.Read(text);
+        var state = ManagedStamp.Decide(SemVer.ParseOrNull(stampVersion), existing);
+        bool write = state == StampState.Unstamped || (state == StampState.ExeNewer && othersChange);
+        if (!write) return ok;
+        return new Item
+        {
+            Name = "vbaloop.toml",
+            Path = tomlPath,
+            Status = ArtifactStatus.Drift,
+            NewContent = ManagedStamp.Upsert(text, stampVersion),
+            Detail = existing == null
+                ? $"managed_by {stampVersion} 기록"
+                : $"managed_by {existing} -> {stampVersion}",
+        };
     }
 
     /// <summary>Analyze가 준비한 내용을 기록. Ok는 건드리지 않는다.</summary>

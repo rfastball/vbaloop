@@ -68,7 +68,7 @@ public class SemVerTests
     [InlineData("0.1.0", "0.1.0", "0.1.0")]
     [InlineData(null, "unknown", "unknown")]
     public void SplitInformational_SeparatesVersionAndRevision(string? info, string version, string revision)
-        => Assert.Equal((version, revision), VersionCommand.SplitInformational(info));
+        => Assert.Equal((version, revision), ExeVersion.SplitInformational(info));
 
     /// <summary>
     /// 로컬 빌드 버전 유도(csproj StampGitRevision)의 결과 검증: 이 테스트가 참조하는 VbaLoop 어셈블리는
@@ -79,7 +79,7 @@ public class SemVerTests
     {
         var info = typeof(VersionCommand).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
-        var (version, revision) = VersionCommand.SplitInformational(info);
+        var (version, revision) = ExeVersion.SplitInformational(info);
         Assert.NotNull(SemVer.ParseOrNull(version));
 
         var tag = Git("describe --tags --match v* --abbrev=0");
