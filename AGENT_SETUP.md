@@ -47,8 +47,16 @@
 vbaloop version
 ```
 
-`vbaloop`를 찾지 못하면 `%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe version`을 시도한다. 둘 다 없으면 설치한다.
-인터넷에서 설치 스크립트를 받아 실행하는 것이므로 사용자에게 알리고 진행한다.
+`vbaloop`를 찾지 못하면 `%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe version`을 시도한다.
+
+찾았으면 이 절차에 필요한 기능이 있는지 확인한다. 옛 버전에는 `--plan`·`--workbook`·`--enable-vbom`이 없다.
+
+```
+vbaloop help
+```
+
+출력의 `setup` 줄에 `--plan`이 없으면 옛 버전이므로 아래 설치 스크립트로 **업그레이드**한다(같은 위치에 덮어쓴다).
+exe가 아예 없을 때도 같은 스크립트로 설치한다. 인터넷에서 설치 스크립트를 받아 실행하는 것이므로 사용자에게 알리고 진행한다.
 
 ```
 powershell -NoProfile -NonInteractive -Command "irm https://raw.githubusercontent.com/rfastball/vbaloop/master/install.ps1 | iex"
@@ -66,7 +74,7 @@ powershell -NoProfile -NonInteractive -Command "irm https://raw.githubuserconten
 1단계에서 정한 시작점으로 실행한다.
 
 ```
-vbaloop setup --plan --json --workbook "C:\work\정산.xlsm"
+vbaloop setup --plan --json --workbook 'C:\work\정산.xlsm'
 ```
 
 `payload` 판독:
@@ -77,7 +85,9 @@ vbaloop setup --plan --json --workbook "C:\work\정산.xlsm"
 | `project` | 프로젝트 폴더(`folder`), 워크북, `action`(copy / reuse / inplace / create / adopt), 검증 방식(`verify`) |
 | `changes` | 실행하면 바뀌는 것들. 사용자에게 보여줄 요약 |
 | `consent[]` | 동의가 필요한 항목. `approveFlag`는 동의 시 붙일 플래그(null이면 이미 기본 동작), `declineFlag`는 거절 시 붙일 플래그(null이면 거절하면 진행 불가) |
-| `command` | 동의 플래그를 뺀 실행 명령 |
+| `ready`가 `false`이고 "다른 vbaloop 프로젝트 안쪽" 오류 | 그 폴더는 바깥 프로젝트에 속해 있다. 사용자에게 다른 위치를 받는다 |
+| `args` | 동의 플래그를 뺀 실행 인자 배열(`"setup"`부터). exe 경로 뒤에 그대로 붙여 실행한다. 셸 인용 문제가 없는 권장 형식 |
+| `command` | 같은 명령을 PowerShell에서 바로 실행할 수 있게 인용한 한 줄. 경로는 작은따옴표라 `$`·백틱이 해석되지 않는다. bash 등 다른 셸에서는 `args`를 쓴다 |
 
 ## 4. 사용자 확인
 
@@ -96,11 +106,11 @@ vbaloop setup --plan --json --workbook "C:\work\정산.xlsm"
 
 ## 5. 실행
 
-`command`에 동의한 `approveFlag`(예: `--enable-vbom`)와 거절한 `declineFlag`를 덧붙여 실행한다.
+`args`(또는 PowerShell이면 `command`)에 동의한 `approveFlag`(예: `--enable-vbom`)와 거절한 `declineFlag`를 덧붙여 실행한다.
 Excel을 띄워 검증하므로 몇 분 걸릴 수 있다. 타임아웃을 5분 이상으로 잡는다.
 
 ```
-vbaloop setup --workbook "C:\work\정산.xlsm" --yes --json --enable-vbom
+vbaloop setup --workbook 'C:\work\정산.xlsm' --yes --json --enable-vbom
 ```
 
 실패하면:
@@ -119,8 +129,8 @@ vbaloop setup --workbook "C:\work\정산.xlsm" --yes --json --enable-vbom
 
 이어가는 방법 두 가지를 제시한다.
 
-- **새 세션(권장)**: `next.newSession`의 명령으로 프로젝트 폴더에서 에이전트를 연다. 그 폴더의 `CLAUDE.md`/`AGENTS.md`와
-  스킬이 자동으로 로드된다.
+- **새 세션(권장)**: `next.newSession`의 항목(에이전트별 `workingDirectory`와 `command`, PowerShell 한 줄 `powershell`)으로
+  프로젝트 폴더에서 에이전트를 연다. 그 폴더의 `CLAUDE.md`/`AGENTS.md`와 스킬이 자동으로 로드된다.
 - **이 세션에서 계속**: `next.continueHere`대로 관리 블록과 `SKILL.md`를 읽고 그 규칙을 따른다. vbaloop 명령은 프로젝트
   폴더에서 실행하거나 `--config`로 그 폴더의 `vbaloop.toml`을 지정한다. exe는 `next.exe`의 절대 경로를 쓴다.
 

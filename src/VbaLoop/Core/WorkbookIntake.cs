@@ -92,6 +92,9 @@ public static class WorkbookIntake
                 Slot.OtherWorkbook => throw new CliError(
                     $"지정 폴더에 다른 워크북(*.xlsm)이 있음: {folder}",
                     "빈 폴더를 지정하거나 --folder를 빼서 원본 옆에 새 폴더를 만들게 하세요"),
+                Slot.NotADirectory => throw new CliError(
+                    $"지정 경로가 폴더가 아니라 파일임: {folder}",
+                    "폴더 경로를 지정하거나 --folder를 빼서 원본 옆에 새 폴더를 만들게 하세요"),
                 _ => throw new CliError(
                     $"지정 폴더에 같은 이름의 다른 워크북이 있음: {Path.Combine(folder, name)}",
                     "덮어쓰지 않습니다 — 다른 폴더를 지정하거나 그 파일을 치운 뒤 다시 실행"),
@@ -152,10 +155,13 @@ public static class WorkbookIntake
         return new Plan(Kind.InPlace, folder, name, source);
     }
 
-    private enum Slot { Empty, Reusable, Free, OtherWorkbook, Conflict }
+    private enum Slot { Empty, Reusable, Free, OtherWorkbook, Conflict, NotADirectory }
 
     private static Slot Inspect(string folder, string name, string source)
     {
+        // 그 경로에 폴더가 아닌 파일이 있으면(예: 원본 옆의 확장자 없는 "Book") 폴더를 만들 수 없다
+        if (File.Exists(folder))
+            return Slot.NotADirectory;
         if (!Directory.Exists(folder) || !Directory.EnumerateFileSystemEntries(folder).Any())
             return Slot.Empty;
 

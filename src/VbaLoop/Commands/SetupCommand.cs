@@ -42,6 +42,14 @@ public static class SetupCommand
         string? givenNewFolder = opts.NewName != null
             ? NewProjectFolder.Resolve(Environment.CurrentDirectory, opts.NewName)
             : null;
+        // 다른 프로젝트 안쪽 폴더는 init·검증이 바깥 프로젝트로 새어 나간다 — 역시 변경 전에 거른다.
+        // --plan은 같은 판정을 blocker로 보고하므로 여기서 던지지 않는다.
+        if (!opts.Plan)
+        {
+            if (givenNewFolder != null) ProjectRoot.EnsureNotNested(givenNewFolder);
+            if (givenWorkbook != null) ProjectRoot.EnsureNotNested(WorkbookIntake.Decide(givenWorkbook, opts.Folder).Folder);
+            else if (opts.Folder != null) ProjectRoot.EnsureNotNested(opts.Folder);
+        }
 
         if (opts.Plan)
             return PlanOnly(opts, givenWorkbook, givenNewFolder, o);
@@ -65,8 +73,7 @@ public static class SetupCommand
             curVer = curVerKey?.GetValue(null) as string;
         Say($"  ok   Excel: {curVer ?? "버전 미상"}");
 
-        bool oleacc = System.Runtime.InteropServices.NativeLibrary.TryLoad("oleacc.dll", out var h);
-        if (oleacc) System.Runtime.InteropServices.NativeLibrary.Free(h);
+        bool oleacc = CanLoadOleacc();
         if (!oleacc)
         {
             Say("  FAIL oleacc.dll 로드 실패");
@@ -161,6 +168,7 @@ public static class SetupCommand
         if (newFolder != null)
         {
             folder = newFolder;
+            ProjectRoot.EnsureNotNested(folder); // 대화형으로 고른 경우(현재 폴더·이름 입력)도 여기서 걸린다
             Say(Directory.Exists(folder)
                 ? "  ok   빈 폴더를 새 프로젝트로 씁니다"
                 : "  ok   새 프로젝트 폴더를 만들었습니다");
@@ -170,6 +178,7 @@ public static class SetupCommand
         {
             string source = WorkbookIntake.Validate(workbookArg);
             var plan = WorkbookIntake.Decide(source, opts.Folder);
+            ProjectRoot.EnsureNotNested(plan.Folder); // 사본을 만들기 전에
             WorkbookIntake.Execute(plan);
             folder = plan.Folder;
             intakeWorkbook = plan.WorkbookName;
@@ -192,6 +201,7 @@ public static class SetupCommand
                 return o;
             }
             folder = Path.GetFullPath(picked);
+            ProjectRoot.EnsureNotNested(folder);
             Directory.CreateDirectory(folder);
         }
         Say($"  → {folder}");
@@ -199,8 +209,13 @@ public static class SetupCommand
         // ── [5/6] 워크북 + 하네스 ───────────────────────────────────────
         Say();
         Say("[5/6] 워크북 + 하네스");
+        // 이미 프로젝트인 폴더(다시 세팅)는 toml이 정본이다 — 하위 폴더의 워크북이나 최상위 워크북 여러 개도
+        // 설정된 것 하나로 확정한다. 스캔하면 엉뚱한 새 워크북을 만들거나 복수 후보로 실패한다.
+        string? configured = intakeWorkbook == null ? ProjectRoot.ConfiguredWorkbook(folder) : null;
         var existing = intakeWorkbook != null
             ? new List<string> { intakeWorkbook } // Decide가 폴더 안의 대상을 이미 하나로 확정했다
+            : configured != null
+            ? new List<string> { configured }
             : Directory.EnumerateFiles(folder, "*.xlsm", SearchOption.TopDirectoryOnly)
                 .Select(Path.GetFileName)
                 .Where(n => n != null && !n.StartsWith("~$"))
@@ -494,7 +509,8 @@ public static class SetupCommand
             Installed: File.Exists(SelfInstall.InstalledExePath),
             RunningInstalled: Environment.ProcessPath != null
                               && PathDrift.SamePath(Environment.ProcessPath, SelfInstall.InstalledExePath),
-            OnUserPath: SelfInstall.IsOnUserPath());
+            OnUserPath: SelfInstall.IsOnUserPath(),
+            OleaccOk: CanLoadOleacc());
         var request = new SetupPlan.Request(workbook, newFolder, opts.Folder,
             opts.InstallOnly, opts.NoInstall, opts.SkipVerify);
         var plan = SetupPlan.Build(request, probes);
@@ -525,7 +541,8 @@ public static class SetupCommand
             project = plan.Project,
             changes = plan.Changes,
             consent = plan.Consents,
-            command = plan.Command,
+            command = plan.Command,   // PowerShell용 한 줄(경로는 작은따옴표)
+            args = plan.Args,         // 셸에 무관한 인자 배열("setup"부터) — exe 절대 경로 뒤에 그대로 붙인다
             agents = DetectAgents(),
         };
 
@@ -566,12 +583,28 @@ public static class SetupCommand
             agentDocs = new[] { Path.Combine(folder, "CLAUDE.md"), Path.Combine(folder, "AGENTS.md") },
             continueHere = $"이 세션에서 이어가려면 {Path.Combine(folder, "CLAUDE.md")}(Codex는 AGENTS.md)의 vbaloop 블록과 "
                            + $"{Path.Combine(folder, ".claude", "skills", "vbaloop", "SKILL.md")}를 읽고, "
-                           + $"이후 vbaloop 명령은 그 폴더에서 실행(또는 --config \"{toml}\")",
-            newSession = DetectAgents().Select(a => $"cd /d \"{folder}\" && {a}").ToArray(),
+                           + $"이후 vbaloop 명령은 그 폴더에서 실행(또는 --config {ShellQuote.PowerShell(toml)})",
+            // 셸마다 문법이 달라(cmd의 cd /d·&&는 PowerShell 5.1에서 실패) 작업 폴더와 명령을 따로 주고,
+            // 바로 실행할 수 있는 PowerShell 한 줄을 곁들인다
+            newSession = DetectAgents().Select(a => new
+            {
+                agent = a,
+                workingDirectory = folder,
+                command = a,
+                powershell = $"Set-Location -LiteralPath {ShellQuote.PowerShell(folder)}; {a}",
+            }).ToArray(),
             excelSession = sessionOpen
                 ? "검증용 도구 소유 Excel 세션이 열려 있음(정상) - 다음 명령이 재사용, 끝낼 때 vbaloop session stop"
                 : null,
         };
+    }
+
+    /// <summary>attach가 쓰는 oleacc.dll을 로드할 수 있는가 — setup 1단계와 --plan이 같은 판정을 쓴다.</summary>
+    private static bool CanLoadOleacc()
+    {
+        bool ok = System.Runtime.InteropServices.NativeLibrary.TryLoad("oleacc.dll", out var h);
+        if (ok) System.Runtime.InteropServices.NativeLibrary.Free(h);
+        return ok;
     }
 
     /// <summary>PATH에서 찾은 코드 에이전트 CLI — 세팅 후 새 세션 안내(next)에 쓴다.</summary>

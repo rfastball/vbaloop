@@ -28,7 +28,7 @@ internal static class Program
         // 경로 문자를 포함하지 않으므로 setup --workbook으로 해석한다. 셸에서 `vbaloop Book.xlsm`도 같다.
         if (WorkbookIntake.LooksLikePath(args[0]))
         {
-            int paths = args.Count(WorkbookIntake.LooksLikePath);
+            int paths = CliArgs.Positionals(args).Count(WorkbookIntake.LooksLikePath);
             if (paths > 1)
             {
                 var multi = new Outcome { Command = "setup" };

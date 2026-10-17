@@ -201,4 +201,26 @@ public class WorkbookIntakeTests
         var wb = t.File("Book.xlsm");
         Assert.Equal(WorkbookIntake.Kind.InPlace, WorkbookIntake.Decide(wb, t.Path + @"\").Kind);
     }
+
+    [Fact]
+    public void Decide_FileAtCopyFolderPath_FallsBackToNumberedSibling()
+    {
+        using var t = new TempDir();
+        var wb = t.File("Book.xlsm");
+        t.File("Book", "확장자 없는 파일"); // 폴더를 만들 수 없는 자리
+
+        var plan = WorkbookIntake.Decide(wb, null);
+
+        Assert.Equal(WorkbookIntake.Kind.Copy, plan.Kind);
+        Assert.Equal(System.IO.Path.Combine(t.Path, "Book (2)"), plan.Folder);
+    }
+
+    [Fact]
+    public void Decide_FolderOverrideIsAFile_Throws()
+    {
+        using var t = new TempDir();
+        var wb = t.File("Book.xlsm");
+        var file = t.File("dest.txt");
+        Assert.Throws<CliError>(() => WorkbookIntake.Decide(wb, file));
+    }
 }

@@ -146,6 +146,15 @@ public class CliArgsTests
     }
 
     [Fact]
+    public void Positionals_SkipOptionValues()
+    {
+        // 축약형 "vbaloop Book.xlsm --folder D:\dest --config C:\r\vbaloop.toml --json"의 워크북은 하나다
+        var argv = new[] { @"C:\w\Book.xlsm", "--folder", @"D:\dest", "--config", @"C:\r\vbaloop.toml", "--json" };
+        Assert.Equal(new[] { @"C:\w\Book.xlsm" }, CliArgs.Positionals(argv));
+        Assert.Equal(new[] { "a.xlsm", "b.xlsm" }, CliArgs.Positionals(new[] { "a.xlsm", "b.xlsm" }));
+    }
+
+    [Fact]
     public void Parse_EnableVbomAndPlan_AreSeparateFromYes()
     {
         var yesOnly = CliArgs.Parse(new[] { "--yes" });

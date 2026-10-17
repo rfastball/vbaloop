@@ -157,16 +157,31 @@ public sealed class CliArgs
     {
         for (int i = 0; i < argv.Length; i++)
         {
-            switch (argv[i])
-            {
-                case "--json":
-                    return true;
-                case "--timeout" or "--config" or "--runid" or "--macro" or "--module"
-                    or "--out" or "--bootstrap" or "--folder" or "--workbook" or "--new" or "--backup":
-                    i++; // 다음 토큰은 이 옵션의 값
-                    break;
-            }
+            if (argv[i] == "--json") return true;
+            if (ValueOptions.Contains(argv[i])) i++; // 다음 토큰은 이 옵션의 값
         }
         return false;
+    }
+
+    /// <summary>값을 하나 받는 옵션 — 다음 토큰은 옵션 값이지 위치 인자가 아니다.</summary>
+    public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
+    {
+        "--timeout", "--config", "--runid", "--macro", "--module",
+        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup",
+    };
+
+    /// <summary>
+    /// 옵션도 옵션 값도 아닌 위치 인자들. 드래그 앤 드롭 축약형(<c>vbaloop Book.xlsm --folder D:\x</c>)에서
+    /// 워크북 경로 수를 셀 때 --folder·--config 같은 값의 경로를 워크북으로 오인하지 않게 한다.
+    /// </summary>
+    public static List<string> Positionals(string[] argv)
+    {
+        var result = new List<string>();
+        for (int i = 0; i < argv.Length; i++)
+        {
+            if (ValueOptions.Contains(argv[i])) { i++; continue; }
+            if (!argv[i].StartsWith('-')) result.Add(argv[i]);
+        }
+        return result;
     }
 }

@@ -22,8 +22,18 @@ public class NewProjectFolderTests
     [InlineData("name.")]
     [InlineData("CON")]
     [InlineData("lpt1")]
+    [InlineData("CON.foo")]   // 장치 이름은 확장자가 붙어도 예약
+    [InlineData("LPT1.test")]
+    [InlineData("nul .txt")]
     public void ValidateName_Rejects(string raw)
         => Assert.Throws<CliError>(() => NewProjectFolder.ValidateName(raw));
+
+    [Theory]
+    [InlineData("Console")]
+    [InlineData("COM10")]
+    [InlineData("my.CON")]
+    public void ValidateName_AllowsNamesMerelyContainingDeviceNames(string raw)
+        => Assert.Equal(raw, NewProjectFolder.ValidateName(raw));
 
     [Fact]
     public void Resolve_NewOrEmptyFolder_ReturnsPath()

@@ -31,7 +31,8 @@ public static class NewProjectFolder
                 "폴더 이름으로 쓸 수 있는 이름만 가능 (\\ / : * ? \" < > | 제외)");
         if (name is "." or ".." || name.EndsWith('.'))
             throw new CliError($"프로젝트 이름은 점으로 끝날 수 없음: {name}", "다른 이름으로 다시 실행");
-        if (ReservedNames.Contains(name))
+        // 장치 이름은 확장자가 붙어도 예약이다(CON.foo, LPT1.test) — 첫 점 앞부분(끝 공백 무시)으로 판정
+        if (ReservedNames.Contains(name.Split('.')[0].TrimEnd(' ')))
             throw new CliError($"Windows 예약 이름은 쓸 수 없음: {name}", "다른 이름으로 다시 실행");
         return name;
     }

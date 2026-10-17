@@ -42,7 +42,8 @@ public class SetupPlanTests
         Assert.Equal("copy", r.Project.Action);
         Assert.Equal("pull", r.Project.Verify);
         Assert.Equal(System.IO.Path.Combine(t.Path, "Book"), r.Project.Folder);
-        Assert.Equal($"vbaloop setup --workbook \"{wb}\" --yes --json", r.Command);
+        Assert.Equal($"vbaloop setup --workbook {ShellQuote.PowerShell(wb)} --yes --json", r.Command);
+        Assert.Equal(new[] { "setup", "--workbook", wb, "--yes", "--json" }, r.Args);
     }
 
     [Fact]
@@ -143,7 +144,7 @@ public class SetupPlanTests
         Assert.Equal("create", r.Project.Action);
         Assert.Equal("MyTool.xlsm", r.Project.Workbook);
         Assert.Equal("push+test", r.Project.Verify);
-        Assert.Equal($"vbaloop setup --folder \"{folder}\" --yes --json", r.Command);
+        Assert.Equal($"vbaloop setup --folder {ShellQuote.PowerShell(folder)} --yes --json", r.Command);
     }
 
     [Theory]
@@ -180,5 +181,57 @@ public class SetupPlanTests
 
         Assert.Equal("skipped", r.Project!.Verify);
         Assert.EndsWith("--skip-verify --yes --json", r.Command);
+    }
+
+    [Fact]
+    public void Command_QuotesPathsSoPowerShellDoesNotInterpolate()
+    {
+        using var t = new TempDir();
+        var wb = t.File(@"$(calc) `x 'q'\Book.xlsm");
+
+        var r = SetupPlan.Build(Req(workbook: wb), AllGood);
+
+        // 작은따옴표 안에서는 $(...)·백틱이 해석되지 않고, 작은따옴표는 겹쳐 쓴다
+        Assert.Contains("'" + wb.Replace("'", "''") + "'", r.Command);
+        Assert.Contains(wb, r.Args); // 배열은 인용 없이 원문 그대로
+    }
+
+    [Fact]
+    public void OleaccMissing_EnvironmentBlocker()
+    {
+        var r = SetupPlan.Build(Req(installOnly: true), AllGood with { OleaccOk = false });
+        Assert.False(r.Ready);
+        Assert.True(r.EnvironmentBlocker);
+        Assert.Contains(r.Blockers, b => b.Contains("oleacc"));
+    }
+
+    [Fact]
+    public void NewFolderInsideAnotherProject_Blocker()
+    {
+        using var t = new TempDir();
+        t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("Outer", "Outer.xlsm"));
+        string inner = System.IO.Path.Combine(t.Path, "sub", "Inner");
+
+        var r = SetupPlan.Build(Req(newFolder: inner), AllGood);
+
+        Assert.False(r.Ready);
+        Assert.Null(r.Project);
+        Assert.Contains(r.Blockers, b => b.Contains("안쪽"));
+    }
+
+    [Fact]
+    public void Folder_ExistingProject_AdoptsConfiguredWorkbook_EvenInSubdirWithSiblings()
+    {
+        using var t = new TempDir();
+        t.File(@"proj\wb\Main.xlsm");
+        t.File(@"proj\A.xlsm");
+        t.File(@"proj\B.xlsm");
+        t.File(@"proj\vbaloop.toml", Onboarding.BuildTomlScaffold("P", "wb/Main.xlsm"));
+
+        var p = SetupPlan.DescribeProject(Req(folder: System.IO.Path.Combine(t.Path, "proj")))!;
+
+        Assert.Equal("adopt", p.Action);
+        Assert.Equal(System.IO.Path.Combine("wb", "Main.xlsm"), p.Workbook);
+        Assert.Equal("pull", p.Verify);
     }
 }
