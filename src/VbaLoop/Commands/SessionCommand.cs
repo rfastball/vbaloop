@@ -10,13 +10,13 @@ public static class SessionCommand
     public static Outcome Run(CliArgs opts)
     {
         string sub = opts.Positional.FirstOrDefault()
-            ?? throw new CliError("session 하위 명령 필요", "session start | session attach | session stop");
+            ?? throw new CliError("session subcommand required", "session start | session attach | session stop");
         return sub switch
         {
             "start" => Start(opts),
             "attach" => Attach(opts),
             "stop" => Stop(opts),
-            _ => throw new CliError($"미지 session 하위 명령: {sub}", "session start | session attach | session stop"),
+            _ => throw new CliError($"Unknown session subcommand: {sub}", "session start | session attach | session stop"),
         };
     }
 
@@ -35,10 +35,10 @@ public static class SessionCommand
         // 결과를 Outcome으로 변환만 한다. payload 스키마는 기존과 동일 유지.
         var r = SessionService.EnsureActive(cfg, log, "session start");
         o.HumanLines.Add(r.Action == "adopted"
-            ? $"기존 세션 채택 (PID {r.Meta.Pid}{(r.Meta.IsExternal ? ", attach한 사용자 Excel" : "")}, no-op)"
-            : $"세션 시작 (PID {r.Meta.Pid}, {Path.GetFileName(r.Meta.WorkbookFullName)})");
+            ? $"Existing session adopted (PID {r.Meta.Pid}{(r.Meta.IsExternal ? ", attached user's Excel" : "")}, no-op)"
+            : $"Session started (PID {r.Meta.Pid}, {Path.GetFileName(r.Meta.WorkbookFullName)})");
         if (cfg.SessionMode == SessionMode.Ephemeral && r.Action == "started")
-            o.HumanLines.Add("일회용 모드지만 이 세션이 살아 있는 동안 push/pull/test/run/diff는 이 Excel을 씀 — 끝내려면 session stop");
+            o.HumanLines.Add("Ephemeral mode, but while this session is alive push/pull/test/run/diff use this Excel — run session stop to end it");
         o.Payload = new { action = r.Action, pid = r.Meta.Pid, hwnd = r.Meta.Hwnd, workbook = r.Meta.WorkbookFullName };
         return o;
     }
@@ -70,7 +70,7 @@ public static class SessionCommand
 
             case SessionState.None:
                 LeaseService.ReleaseIfMine(cfg, log);
-                o.HumanLines.Add("세션 없음 (no-op)");
+                o.HumanLines.Add("No session (no-op)");
                 o.Payload = new { action = "none" };
                 return o;
 
@@ -82,7 +82,7 @@ public static class SessionCommand
                 SessionMeta.Delete(cfg.SessionMetaPath);
                 log.Write("info", "session_cleaned", new { prevState = info.State.ToString() });
                 LeaseService.ReleaseIfMine(cfg, log);
-                o.HumanLines.Add($"{info.State.ToString().ToLowerInvariant()} 세션 정리 완료");
+                o.HumanLines.Add($"{info.State.ToString().ToLowerInvariant()} session cleaned up");
                 o.Payload = new { action = "cleaned", prevState = info.State.ToString().ToLowerInvariant() };
                 return o;
         }
@@ -96,7 +96,7 @@ public static class SessionCommand
             SessionMeta.Delete(cfg.SessionMetaPath);
             log.Write("info", "session_detached", new { pid = meta.Pid });
             LeaseService.ReleaseIfMine(cfg, log);
-            o.HumanLines.Add($"세션 분리 (사용자 Excel PID {meta.Pid}는 그대로 — 저장/종료 안 함)");
+            o.HumanLines.Add($"Session detached (user's Excel PID {meta.Pid} left as is — not saved/closed)");
             o.Payload = new { action = "detached", pid = meta.Pid, saved = false };
             return o;
         }
@@ -156,10 +156,10 @@ public static class SessionCommand
                     driftSuspects,
                     saveDrift,
                 };
-                o.Fail($"도구 외 워크북 {foreign.Count}개가 열려 있어 Quit 거부 — Excel은 실행 상태 유지",
+                o.Fail($"Quit refused: {foreign.Count} non-tool workbooks open — Excel left running",
                     driftSuspects.Count > 0
-                        ? $"동명 워크북이 다른 경로에 열려 있음({driftSuspects[0]}) — FullName 드리프트(SaveAs 오탈출) 의심, 정본 최신성 확인 필요"
-                        : "사람 작업을 저장/종료한 뒤 Excel을 수동으로 닫을 것");
+                        ? $"Same-named workbook open at a different path ({driftSuspects[0]}) — suspected FullName drift (SaveAs escape), verify the canonical workbook is current"
+                        : "Do not close Excel yourself; ask the user to save/close their workbooks and close Excel manually");
                 return o;
             }
 
@@ -167,9 +167,9 @@ public static class SessionCommand
             SessionMeta.Delete(cfg.SessionMetaPath);
             log.Write("info", "session_stopped", new { pid = meta.Pid });
             LeaseService.ReleaseIfMine(cfg, log); // 작업 종료와 lease 수명 결합(자동 획득 모델의 짝)
-            o.HumanLines.Add($"세션 종료 (PID {meta.Pid})");
+            o.HumanLines.Add($"Session ended (PID {meta.Pid})");
             if (saveDrift != null)
-                o.HumanLines.Add($"경고: 저장이 정본이 아니라 {saveDrift}로 기록됨(SaveAs 오탈출 의심) — 정본 최신성 확인 필요");
+                o.HumanLines.Add($"Warning: saved to {saveDrift} instead of the canonical workbook (suspected SaveAs escape) — verify the canonical workbook is current");
             o.Payload = new { action = "stopped", pid = meta.Pid, saved = !opts.NoSave, saveDrift };
             return o;
         }
@@ -196,18 +196,18 @@ public static class SessionCommand
         RecoveryGate.Enforce(cfg, log);
 
         if (!File.Exists(cfg.WorkbookPath))
-            throw new CliError($"워크북 파일 없음: {cfg.WorkbookPath}", "vbaloop.toml의 [excel].workbook 경로 확인");
+            throw new CliError($"Workbook file not found: {cfg.WorkbookPath}", "Check the [excel].workbook path in vbaloop.toml");
 
         var info = SessionService.Inspect(cfg);
         switch (info.State)
         {
             case SessionState.Active when info.Meta!.IsExternal:
-                o.HumanLines.Add($"이미 attach됨 (사용자 Excel PID {info.Meta.Pid}, no-op)");
+                o.HumanLines.Add($"Already attached (user's Excel PID {info.Meta.Pid}, no-op)");
                 o.Payload = new { action = "adopted", pid = info.Meta.Pid, workbook = info.Meta.WorkbookFullName, owner = SessionMeta.OwnerExternal };
                 return o;
             case SessionState.Active:
-                o.Fail($"도구가 띄운 세션(PID {info.Meta!.Pid})이 활성 — 정본은 그 세션에 열려 있음",
-                    "그 세션으로 계속 작업하거나, vbaloop session stop 후 사용자 Excel에서 열고 session attach");
+                o.Fail($"A tool-launched session (PID {info.Meta!.Pid}) is active — the canonical workbook is open in it",
+                    "Keep working in that session, or run vbaloop session stop, have the user open the workbook in their Excel, then (after the user confirms) session attach");
                 return o;
             case SessionState.Busy:
                 throw SessionService.BusyError(info);
@@ -229,29 +229,29 @@ public static class SessionCommand
         {
             case AttachPickKind.NotOpen when scan.BusyPids.Count > 0:
                 throw new CliError(
-                    $"Excel(PID {string.Join(", ", scan.BusyPids)})이 busy라 열린 워크북을 확인하지 못함",
-                    "Excel에서 셀 편집/열린 대화상자를 마친 뒤 session attach 재시도", environment: true);
+                    $"Excel (PID {string.Join(", ", scan.BusyPids)}) is busy; could not check open workbooks",
+                    "Excel is in cell edit mode or showing a dialog; retry session attach shortly", environment: true);
             case AttachPickKind.NotOpen:
                 o.Payload = new { action = "not_found", suspects = pick.Suspects, errors = scan.Errors };
-                o.Fail($"정본 워크북을 연 Excel을 찾지 못함: {cfg.WorkbookPath}",
+                o.Fail($"No Excel found with the canonical workbook open: {cfg.WorkbookPath}",
                     pick.Suspects.Count > 0
-                        ? $"동명 워크북이 다른 경로/URL로 열려 있음({pick.Suspects[0]}) — vbaloop.toml 경로 또는 OneDrive 동기화 경로 확인"
-                        : "사용자가 Excel에서 정본을 연 뒤 재시도 — attach 없이 push/test하면 도구가 별도 Excel을 띄운다");
+                        ? $"Same-named workbook open at a different path/URL ({pick.Suspects[0]}) — check the vbaloop.toml path or the OneDrive sync path"
+                        : "Retry after the user opens the canonical workbook in Excel — push/test without attach launches a separate Excel");
                 return o;
             case AttachPickKind.ReadOnlyOnly:
-                o.Fail($"정본이 read-only로만 열려 있어 채택하지 않음(PID {pick.Target!.Pid}) — push의 저장이 다른 위치로 새는 split-brain 위험",
-                    "사용자가 읽기 전용을 해제하거나 쓰기 잠금 보유 프로세스를 확인(vbaloop doctor)");
+                o.Fail($"Not adopted: canonical workbook is open read-only only (PID {pick.Target!.Pid}) — split-brain risk, push saves would leak to another location",
+                    "The user should clear read-only or check the process holding the write lock (vbaloop doctor)");
                 return o;
             case AttachPickKind.Ambiguous:
-                o.Fail($"정본이 여러 Excel 인스턴스에서 쓰기 가능으로 열려 있음: {string.Join("; ", pick.Suspects)}",
-                    "사용자가 한쪽만 남기고 닫은 뒤 재시도");
+                o.Fail($"Canonical workbook is open writable in multiple Excel instances: {string.Join("; ", pick.Suspects)}",
+                    "The user should close all but one, then retry");
                 return o;
         }
 
         var target = pick.Target!;
         dynamic app = scan.Apps[target.Pid];
         string start = ProcessIdentity.GetStartTimeIso(target.Pid)
-            ?? throw new CliError($"PID {target.Pid}의 StartTime을 읽지 못함", environment: true);
+            ?? throw new CliError($"Could not read StartTime of PID {target.Pid}", environment: true);
         long hwnd = Convert.ToInt64(app.Hwnd);
         var meta = new SessionMeta
         {
@@ -265,8 +265,8 @@ public static class SessionCommand
         };
         meta.Save(cfg.SessionMetaPath);
         log.Write("info", "session_attached", new { pid = meta.Pid, hwnd, workbook = meta.WorkbookFullName });
-        o.HumanLines.Add($"사용자 Excel 채택 (PID {meta.Pid}, {Path.GetFileName(meta.WorkbookFullName)}) — "
-                         + "push/pull/test/run은 이 Excel에서 동작, session stop은 분리만(저장/종료 안 함)");
+        o.HumanLines.Add($"User's Excel adopted (PID {meta.Pid}, {Path.GetFileName(meta.WorkbookFullName)}) — "
+                         + "push/pull/test/run operate in this Excel; session stop only detaches (no save/close)");
         o.Payload = new { action = "attached", pid = meta.Pid, hwnd, workbook = meta.WorkbookFullName, owner = SessionMeta.OwnerExternal };
         return o;
     }
@@ -283,7 +283,7 @@ public static class SessionCommand
         if (meta == null && marker == null)
         {
             LeaseService.ReleaseIfMine(cfg, log);
-            o.HumanLines.Add("세션 없음 (no-op)");
+            o.HumanLines.Add("No session (no-op)");
             o.Payload = new { action = "none" };
             return o;
         }
@@ -310,8 +310,8 @@ public static class SessionCommand
         {
             case DiscardAction.Refuse:
                 o.Payload = new { action = "refused", pid, reason = d.Why, workbooks = probe?.Workbooks };
-                o.Fail($"session stop --discard 거부: {d.Why}",
-                    "사용자가 해당 Excel의 작업을 저장/종료한 뒤 vbaloop recovery clear");
+                o.Fail($"session stop --discard refused: {d.Why}",
+                    "Do not kill Excel yourself; inform the user. After the user saves/closes the work in that Excel, run vbaloop recovery clear");
                 return o;
 
             case DiscardAction.Kill:
@@ -319,14 +319,14 @@ public static class SessionCommand
                 {
                     if (marker == null && meta != null)
                     {
-                        RecoveryMarker.For(meta, "discard_failed", "kill 후에도 프로세스 잔존", "session stop --discard")
+                        RecoveryMarker.For(meta, "discard_failed", "process still alive after kill", "session stop --discard")
                             .Save(cfg.RecoveryMarkerPath);
                         ExcelPidRegistry.TryRecord(ExcelPidRegistry.DefaultPath, meta.Pid, meta.ExcelStartTime,
                             ExcelPidRegistry.KindQuarantined, cfg.RootDir);
                     }
                     o.Payload = new { action = "kill_failed", pid };
-                    o.Fail($"Excel PID {pid} 종료를 확인하지 못함 — 격리 유지",
-                        "작업 관리자에서 해당 EXCEL.EXE 상태 확인 후 vbaloop recovery clear", environment: true);
+                    o.Fail($"Could not confirm Excel PID {pid} exited — quarantine kept",
+                        $"Ask the user to check EXCEL.EXE (PID {pid}) in Task Manager and close it, then run vbaloop recovery clear", environment: true);
                     return o;
                 }
                 break;
@@ -344,9 +344,9 @@ public static class SessionCommand
         log.Write("warn", "session_discarded", new { pid, action });
         o.HumanLines.Add(d.Action switch
         {
-            DiscardAction.Kill => $"세션 버림: Excel PID {pid} 종료(저장 안 함), 격리 해제",
-            DiscardAction.Detach => $"세션 분리: 사용자 Excel PID {pid}는 그대로 둠(저장/종료 안 함), 격리 해제",
-            _ => $"세션 정리: {d.Why}, 격리 해제",
+            DiscardAction.Kill => $"Session discarded: Excel PID {pid} killed (not saved), quarantine lifted",
+            DiscardAction.Detach => $"Session detached: user's Excel PID {pid} left as is (not saved/closed), quarantine lifted",
+            _ => $"Session cleaned up: {d.Why}, quarantine lifted",
         });
         o.Payload = new { action, pid, reason = d.Why };
         return o;

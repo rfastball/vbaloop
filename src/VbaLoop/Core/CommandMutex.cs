@@ -33,8 +33,8 @@ public sealed class CommandMutex : IDisposable
         if (!held)
         {
             mutex.Dispose();
-            throw new CliError("다른 vbaloop 명령이 이 프로젝트에서 실행 중",
-                "해당 명령이 끝난 뒤 재시도 (동시 실행은 같은 Excel 세션을 인터리브함)");
+            throw new CliError("Another vbaloop command is running in this project",
+                "Retry after that command finishes (concurrent runs would interleave on the same Excel session)");
         }
         return new CommandMutex(mutex);
     }

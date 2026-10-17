@@ -110,7 +110,7 @@ public static class Output
 
         // 업데이트 알림은 stderr — stdout을 파싱하는 호출자를 깨지 않는다
         if (o.Update != null)
-            Console.Error.WriteLine($"vbaloop {o.Update.Latest} 사용 가능 (현재 {o.Update.Current}) - {o.Update.Command}");
+            Console.Error.WriteLine($"vbaloop {o.Update.Latest} available (current {o.Update.Current}) - {o.Update.Command}");
     }
 
     /// <summary>--json 봉투 직렬화(테스트 공용).</summary>

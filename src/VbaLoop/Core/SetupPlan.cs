@@ -46,15 +46,15 @@ public static class SetupPlan
 
         if (!p.ExcelOk)
         {
-            blockers.Add("Excel 데스크톱이 설치돼 있지 않음 (Excel.Application ProgID 없음)");
-            hint = "Excel 데스크톱 버전을 설치한 뒤 다시 실행 (Microsoft 365 웹/모바일은 COM 자동화 불가)";
+            blockers.Add("Desktop Excel is not installed (Excel.Application ProgID missing)");
+            hint = "Install desktop Excel and rerun (Microsoft 365 web/mobile do not support COM automation)";
             environmentBlocker = true;
         }
         if (!p.OleaccOk)
         {
             // setup 1단계가 같은 이유로 거부한다 — 미리보기도 같은 판정을 내야 동의를 헛되이 받지 않는다
-            blockers.Add("oleacc.dll을 로드할 수 없음 — Windows 구성 손상");
-            hint ??= "vbaloop doctor로 상세 점검";
+            blockers.Add("Cannot load oleacc.dll — Windows installation damaged");
+            hint ??= "Run vbaloop doctor for details";
             environmentBlocker = true;
         }
 
@@ -66,8 +66,8 @@ public static class SetupPlan
                 project = DescribeProject(r);
                 if (project == null)
                 {
-                    blockers.Add("시작점이 지정되지 않음");
-                    hint ??= "기존 워크북: --workbook <경로.xlsm> / 새 프로젝트: --new <이름> / 준비된 폴더: --folder <경로>";
+                    blockers.Add("No starting point specified");
+                    hint ??= "Existing workbook: --workbook <path.xlsm> / new project: --new <name> / prepared folder: --folder <path>";
                 }
             }
             catch (CliError e)
@@ -83,18 +83,18 @@ public static class SetupPlan
         if (!r.NoInstall && (!p.RunningInstalled || !p.OnUserPath))
         {
             consents.Add(new Consent("install",
-                $"vbaloop.exe를 {SelfInstall.InstallDir}에 복사하고 사용자 PATH에 등록 (이후 어느 셸에서나 vbaloop 실행)",
+                $"Copy vbaloop.exe to {SelfInstall.InstallDir} and add it to the user PATH (vbaloop then runs from any shell)",
                 null, "--no-install"));
-            if (!p.RunningInstalled) changes.Add($"exe 복사: {SelfInstall.InstalledExePath}");
-            if (!p.OnUserPath) changes.Add($"사용자 PATH에 추가: {SelfInstall.InstallDir}");
+            if (!p.RunningInstalled) changes.Add($"Copy exe: {SelfInstall.InstalledExePath}");
+            if (!p.OnUserPath) changes.Add($"Add to user PATH: {SelfInstall.InstallDir}");
         }
         if (!p.VbomOk)
         {
             consents.Add(new Consent("accessVbom",
-                "Excel 보안 설정 'VBA 프로젝트 개체 모델에 대한 신뢰할 수 있는 액세스'를 켬 (HKCU Excel\\Security\\AccessVBOM=1). "
-                + "꺼져 있으면 vbaloop가 동작하지 않음. 되돌리기: Excel 옵션 > 보안 센터 > 매크로 설정",
+                "Turn on the Excel security setting 'Trust access to the VBA project object model' (HKCU Excel\\Security\\AccessVBOM=1). "
+                + "vbaloop does not work while it is off. To revert: Excel Options > Trust Center > Macro Settings",
                 "--enable-vbom", null));
-            changes.Add("AccessVBOM 켜기 (--enable-vbom을 붙였을 때만)");
+            changes.Add("Turn on AccessVBOM (only when --enable-vbom is given)");
         }
 
         if (project != null)
@@ -102,19 +102,19 @@ public static class SetupPlan
             string wbPath = Path.Combine(project.Folder, project.Workbook);
             changes.Add(project.Action switch
             {
-                "copy" => $"원본 사본 생성: {wbPath} (원본은 그대로)",
-                "reuse" => $"이전에 만든 개발 폴더 재사용: {project.Folder}",
-                "inplace" => $"원본이 이미 프로젝트 안에 있어 그 자리에서 사용: {project.Folder}",
-                "create" => $"폴더와 빈 매크로 워크북 생성: {wbPath} (Excel을 잠시 띄움)",
-                _ => $"폴더의 기존 워크북 채택: {wbPath}",
+                "copy" => $"Create a copy of the original: {wbPath} (original left untouched)",
+                "reuse" => $"Reuse previously created dev folder: {project.Folder}",
+                "inplace" => $"Original is already inside a project; use in place: {project.Folder}",
+                "create" => $"Create folder and empty macro workbook: {wbPath} (starts Excel briefly)",
+                _ => $"Adopt existing workbook in folder: {wbPath}",
             });
-            changes.Add("관리 파일 설치: vbaloop.toml, CLAUDE.md, AGENTS.md, .claude\\skills\\vbaloop\\, src\\LogShim.bas, .gitignore 블록"
-                        + (project.Action == "create" ? ", 샘플 테스트 모듈" : ""));
+            changes.Add("Install managed files: vbaloop.toml, CLAUDE.md, AGENTS.md, .claude\\skills\\vbaloop\\, src\\LogShim.bas, .gitignore block"
+                        + (project.Action == "create" ? ", sample test module" : ""));
             changes.Add(project.Verify switch
             {
-                "pull" => "검증: 도구 소유 Excel을 띄워 워크북 코드를 src\\로 꺼냄 (사용자가 연 Excel은 건드리지 않음)",
-                "push+test" => "검증: 도구 소유 Excel을 띄워 샘플 테스트 push + test로 초록불 확인",
-                _ => "검증 생략 (--skip-verify)",
+                "pull" => "Verify: start a tool-owned Excel and pull workbook code into src\\ (the user's Excel is not touched)",
+                "push+test" => "Verify: start a tool-owned Excel, push the sample test and run test to confirm green",
+                _ => "Verification skipped (--skip-verify)",
             });
         }
 
@@ -152,8 +152,8 @@ public static class SetupPlan
                     .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
                 : new List<string>();
             if (existing.Count > 1)
-                throw new CliError($"워크북 후보가 복수임: {string.Join(", ", existing)}",
-                    "가져올 워크북을 지정: vbaloop setup --workbook <경로.xlsm> (원본 옆 새 폴더에 사본을 만든다)");
+                throw new CliError($"Multiple workbook candidates: {string.Join(", ", existing)}",
+                    "Specify the workbook to import: vbaloop setup --workbook <path.xlsm> (a copy is made in a new folder next to the original)");
             return existing.Count == 0
                 ? new Project("folder", folder, new DirectoryInfo(folder).Name + ".xlsm", "create", null,
                     r.SkipVerify ? "skipped" : "push+test")

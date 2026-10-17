@@ -63,13 +63,13 @@ public class BugReportTests
         var text = BugReport.BuildTemplate("pull이 X를 깨뜨림", new DateOnly(2026, 7, 9),
             "SampleRpa", "8acb552, built 2026-07-09 10:00:00");
         Assert.Contains("# [BUG] pull이 X를 깨뜨림", text);
-        Assert.Contains("- 보고일: 2026-07-09", text);
-        Assert.Contains("- 보고자: SampleRpa 세션 (Claude Code)", text);
-        Assert.Contains("- 실행 exe 빌드: 8acb552, built 2026-07-09 10:00:00", text);
-        Assert.Contains("## 요약", text);
-        Assert.Contains("## 증거", text);
-        Assert.Contains("## 제안 수정", text);
-        Assert.Contains("## 재현 절차", text);
+        Assert.Contains("- Reported: 2026-07-09", text);
+        Assert.Contains("- Reporter: SampleRpa session (Claude Code)", text);
+        Assert.Contains("- Running exe build: 8acb552, built 2026-07-09 10:00:00", text);
+        Assert.Contains("## Summary", text);
+        Assert.Contains("## Evidence", text);
+        Assert.Contains("## Proposed fix", text);
+        Assert.Contains("## Repro steps", text);
         Assert.EndsWith("\r\n", text); // 정규 텍스트 규약
         Assert.DoesNotContain("\n\n\n", text.Replace("\r", ""));
     }
@@ -87,6 +87,15 @@ public class BugReportTests
         Assert.Equal(2, reports.Count);
         Assert.Equal(("2026-07-08_fixed-bug.md", "[BUG] 고쳐진 버그", true), reports[0]);
         Assert.Equal(("2026-07-09_open-bug.md", "[BUG] 열린 버그", false), reports[1]);
+    }
+
+    [Fact]
+    public void ListReports_ResolvedSectionInEnglish()
+    {
+        using var t = new TempDir();
+        t.File("2026-10-17_fixed.md", "# [BUG] fixed\r\n\r\n## Summary\r\n\r\nbody\r\n\r\n## Resolved (2026-10-17)\r\n\r\ndone\r\n");
+        var reports = BugReport.ListReports(t.Path);
+        Assert.Equal(("2026-10-17_fixed.md", "[BUG] fixed", true), Assert.Single(reports));
     }
 
     [Fact]

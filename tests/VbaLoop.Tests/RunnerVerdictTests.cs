@@ -20,7 +20,7 @@ public class RunnerVerdictTests
     {
         var (result, detail) = RunnerVerdict.Decide("오버플로", NoAsserts, null, sessionDead: false);
         Assert.Equal(RunnerVerdict.Fail, result);
-        Assert.Equal("런타임 에러: 오버플로", detail);
+        Assert.Equal("runtime error: 오버플로", detail);
     }
 
     [Fact]
@@ -29,12 +29,12 @@ public class RunnerVerdictTests
         var five = new[] { "a1: expected=1 actual=2", "a2", "a3", "a4", "a5" };
         var (r1, d1) = RunnerVerdict.Decide(null, five, null, sessionDead: false);
         Assert.Equal(RunnerVerdict.Fail, r1);
-        Assert.DoesNotContain("외", d1);
+        Assert.DoesNotContain("more", d1);
 
         var seven = five.Concat(new[] { "a6", "a7" }).ToArray();
         var (r2, d2) = RunnerVerdict.Decide(null, seven, null, sessionDead: false);
         Assert.Equal(RunnerVerdict.Fail, r2);
-        Assert.EndsWith("외 2건", d2);
+        Assert.EndsWith("and 2 more", d2);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class RunnerVerdictTests
         var (result, detail) = RunnerVerdict.Decide(
             "'C:\\Users\\x\\Documents\\A.xlsm'을(를) 찾을 수 없습니다.", NoAsserts, null, sessionDead: true);
         Assert.Equal(RunnerVerdict.Skipped, result);
-        Assert.Contains("오탐", detail);
+        Assert.Contains("false positive", detail);
     }
 
     [Fact]

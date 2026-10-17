@@ -39,7 +39,7 @@ public static class SelfInstall
     public static (bool Copied, string Path) CopySelf()
     {
         string? src = Environment.ProcessPath
-            ?? throw new CliError("실행 파일 경로를 알 수 없어 설치를 진행할 수 없음");
+            ?? throw new CliError("Cannot determine the executable path, so installation cannot proceed");
         string dest = InstalledExePath;
         if (PathDrift.SamePath(src, dest)) return (false, dest);
 
@@ -50,8 +50,8 @@ public static class SelfInstall
         }
         catch (IOException ex)
         {
-            throw new CliError($"설치 폴더로 복사 실패: {ex.Message}",
-                $"실행 중인 vbaloop(또는 {dest})를 종료한 뒤 재시도");
+            throw new CliError($"Failed to copy to install folder: {ex.Message}",
+                $"Close the running vbaloop (or {dest}) and retry");
         }
         return (true, dest);
     }
@@ -64,7 +64,7 @@ public static class SelfInstall
     public static bool EnsureOnPath()
     {
         using var env = Registry.CurrentUser.OpenSubKey("Environment", writable: true)
-            ?? throw new CliError(@"HKCU\Environment 키를 열 수 없음");
+            ?? throw new CliError(@"Cannot open HKCU\Environment key");
         string raw = env.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
         var (newPath, changed) = AddToPathValue(raw, InstallDir);
         if (!changed) return false;

@@ -31,8 +31,8 @@ public static class LogShimRelease
         }
         if (!flipped)
             throw new CliError(
-                "LogShim에 IS_RELEASE 상수가 없음 — 배포 무해화 계약 위반",
-                "assets/LogShim.bas에 Private Const IS_RELEASE As Boolean = False 추가 후 rollout.ps1 재벤더링");
+                "LogShim has no IS_RELEASE constant — violates the distribution sanitize contract",
+                "Add Private Const IS_RELEASE As Boolean = False to assets/LogShim.bas, then re-vendor with rollout.ps1");
         return result;
     }
 

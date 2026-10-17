@@ -26,10 +26,10 @@ public static class TomlMini
             if (line.StartsWith('['))
             {
                 if (!line.EndsWith(']'))
-                    throw Bad(sourceName, lineNo, raw, "섹션 헤더는 [이름] 한 줄이어야 함");
+                    throw Bad(sourceName, lineNo, raw, "a section header must be a single [name] line");
                 string section = line[1..^1].Trim();
                 if (section.Length == 0 || section.Contains('[') || section.Contains(']'))
-                    throw Bad(sourceName, lineNo, raw, "섹션 이름이 비었거나 중첩 섹션은 미지원");
+                    throw Bad(sourceName, lineNo, raw, "section name is empty, or nested sections are not supported");
                 if (!result.TryGetValue(section, out current))
                 {
                     current = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -40,24 +40,24 @@ public static class TomlMini
 
             int eq = line.IndexOf('=');
             if (eq < 1)
-                throw Bad(sourceName, lineNo, raw, "key = value 형식이 아님");
+                throw Bad(sourceName, lineNo, raw, "not in key = value form");
             if (current == null)
-                throw Bad(sourceName, lineNo, raw, "섹션 헤더([project] 등) 이전에 키가 나옴");
+                throw Bad(sourceName, lineNo, raw, "key appears before any section header (e.g. [project])");
 
             string key = line[..eq].Trim();
             string valuePart = line[(eq + 1)..].Trim();
             if (key.Length == 0 || key.Contains(' ') || key.Contains('"'))
-                throw Bad(sourceName, lineNo, raw, "키 이름 형식이 잘못됨");
+                throw Bad(sourceName, lineNo, raw, "invalid key name format");
 
             object value;
             if (valuePart.StartsWith('"'))
             {
                 int close = valuePart.IndexOf('"', 1);
                 if (close < 0)
-                    throw Bad(sourceName, lineNo, raw, "닫는 따옴표가 없음");
+                    throw Bad(sourceName, lineNo, raw, "missing closing quote");
                 string rest = valuePart[(close + 1)..].Trim();
                 if (rest.Length > 0 && !rest.StartsWith('#'))
-                    throw Bad(sourceName, lineNo, raw, "문자열 값 뒤에 주석 외 내용이 있음");
+                    throw Bad(sourceName, lineNo, raw, "content other than a comment follows the string value");
                 value = valuePart[1..close];
             }
             else if (valuePart.StartsWith('['))
@@ -74,14 +74,14 @@ public static class TomlMini
                     _ when IsDecimalInteger(bare) => int.TryParse(bare, System.Globalization.NumberStyles.AllowLeadingSign,
                         System.Globalization.CultureInfo.InvariantCulture, out var n)
                             ? n
-                            : throw Bad(sourceName, lineNo, raw, "정수 값이 int 범위를 벗어남"),
+                            : throw Bad(sourceName, lineNo, raw, "integer value is outside int range"),
                     _ => throw Bad(sourceName, lineNo, raw,
-                        "지원 값은 \"문자열\", true, false, 정수, [\"문자열\", ...] 뿐(실수/테이블 미지원)"),
+                        "supported values are only \"string\", true, false, integer, [\"string\", ...] (floats/tables not supported)"),
                 };
             }
 
             if (current.ContainsKey(key))
-                throw Bad(sourceName, lineNo, raw, $"키 중복: {key}");
+                throw Bad(sourceName, lineNo, raw, $"duplicate key: {key}");
             current[key] = value;
         }
 
@@ -98,19 +98,19 @@ public static class TomlMini
             while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
             if (i < s.Length && s[i] == ']') { i++; break; }
             if (i >= s.Length || s[i] != '"')
-                throw Bad(source, lineNo, raw, "배열 원소는 \"문자열\"이어야 함");
+                throw Bad(source, lineNo, raw, "array elements must be \"strings\"");
             int close = s.IndexOf('"', i + 1);
-            if (close < 0) throw Bad(source, lineNo, raw, "배열 원소의 닫는 따옴표가 없음");
+            if (close < 0) throw Bad(source, lineNo, raw, "missing closing quote on array element");
             list.Add(s[(i + 1)..close]);
             i = close + 1;
             while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
             if (i < s.Length && s[i] == ',') { i++; continue; }
             if (i < s.Length && s[i] == ']') { i++; break; }
-            throw Bad(source, lineNo, raw, "배열 원소 뒤에 , 또는 ] 필요");
+            throw Bad(source, lineNo, raw, "expected , or ] after array element");
         }
         string rest = s[i..].Trim();
         if (rest.Length > 0 && !rest.StartsWith('#'))
-            throw Bad(source, lineNo, raw, "배열 값 뒤에 주석 외 내용이 있음");
+            throw Bad(source, lineNo, raw, "content other than a comment follows the array value");
         return list;
     }
 
@@ -131,6 +131,6 @@ public static class TomlMini
     }
 
     private static CliError Bad(string source, int lineNo, string raw, string why)
-        => new($"{source}:{lineNo}: TOML 파싱 실패 ({why}): {raw.Trim()}",
-               "vbaloop.toml은 [section] / key = \"문자열\"|true|false|정수 / # 주석만 지원");
+        => new($"{source}:{lineNo}: TOML parse failed ({why}): {raw.Trim()}",
+               "vbaloop.toml supports only [section] / key = \"string\"|true|false|integer / # comments");
 }

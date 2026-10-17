@@ -27,21 +27,21 @@ public static class ExcelAttach
     public static AttachResult TryAttach(SessionMeta meta)
     {
         if (!ProcessIdentity.IsAlive(meta.Pid, meta.ExcelStartTime))
-            return new AttachResult(null, $"PID {meta.Pid} 프로세스가 없거나 StartTime 불일치(PID 재사용)");
+            return new AttachResult(null, $"PID {meta.Pid} process missing or StartTime mismatch (PID reuse)");
         if (meta.IsExternal)
             return TryAttachExternal(meta);
 
         var xlMain = new IntPtr(meta.Hwnd);
         if (!NativeMethods.IsWindow(xlMain))
-            return new AttachResult(null, $"HWND 0x{meta.Hwnd:X}이 유효한 창이 아님");
+            return new AttachResult(null, $"HWND 0x{meta.Hwnd:X} is not a valid window");
 
         NativeMethods.GetWindowThreadProcessId(xlMain, out uint windowPid);
         if (windowPid != (uint)meta.Pid)
-            return new AttachResult(null, $"HWND 소유 PID({windowPid})가 메타파일 PID({meta.Pid})와 불일치");
+            return new AttachResult(null, $"HWND owner PID ({windowPid}) does not match metafile PID ({meta.Pid})");
 
         var excel7 = NativeMethods.FindExcel7Child(xlMain);
         if (excel7 == IntPtr.Zero)
-            return new AttachResult(null, "EXCEL7 자식 창을 찾지 못함(워크북 창 없음)");
+            return new AttachResult(null, "EXCEL7 child window not found (no workbook window)");
 
         var att = ApplicationFromExcel7(excel7, meta.Pid, BusyRetries);
         if (att.App == null) return att;
@@ -58,7 +58,7 @@ public static class ExcelAttach
         }
         if (appHwnd != meta.Hwnd)
             return new AttachResult(null,
-                $"획득한 Application.Hwnd(0x{appHwnd:X})가 메타파일 HWND(0x{meta.Hwnd:X})와 불일치");
+                $"acquired Application.Hwnd (0x{appHwnd:X}) does not match metafile HWND (0x{meta.Hwnd:X})");
         return att;
     }
 
@@ -73,7 +73,7 @@ public static class ExcelAttach
             .Where(w => w.ClassName == "XLMAIN")
             .OrderByDescending(w => w.Hwnd.ToInt64() == meta.Hwnd) // 기록된 창 우선
             .ToList();
-        string last = "사용자 Excel에서 워크북 창(EXCEL7)을 찾지 못함";
+        string last = "workbook window (EXCEL7) not found in the user's Excel";
         foreach (var w in windows)
         {
             var excel7 = NativeMethods.FindExcel7Child(w.Hwnd);
@@ -86,7 +86,7 @@ public static class ExcelAttach
                 continue;
             }
             if (!SessionService.IsWorkbookAlive(att.App, meta.WorkbookFullName))
-                return new AttachResult(null, $"사용자 Excel(PID {meta.Pid})에서 정본 워크북이 닫힘");
+                return new AttachResult(null, $"canonical workbook closed in the user's Excel (PID {meta.Pid})");
             return att;
         }
         return new AttachResult(null, last);
@@ -154,7 +154,7 @@ public static class ExcelAttach
                 break;
             }
             if (!done && xlMains.Count > 0)
-                scan.Errors.Add($"PID {pid}: 워크북 창(EXCEL7) 없음");
+                scan.Errors.Add($"PID {pid}: no workbook window (EXCEL7)");
         }
         return scan;
     }
@@ -175,7 +175,7 @@ public static class ExcelAttach
                 excel7, NativeMethods.OBJID_NATIVEOM, ref iid, out object? nativeOm);
             if (hr != 0 || nativeOm == null)
             {
-                lastError = $"AccessibleObjectFromWindow 실패 (hr=0x{hr:X8})";
+                lastError = $"AccessibleObjectFromWindow failed (hr=0x{hr:X8})";
                 busy = false;
                 continue;
             }
@@ -186,7 +186,7 @@ public static class ExcelAttach
                 long appHwnd = Convert.ToInt64(app.Hwnd);
                 NativeMethods.GetWindowThreadProcessId(new IntPtr(appHwnd), out uint appPid);
                 if (appPid != (uint)expectedPid)
-                    return new AttachResult(null, $"Application 소유 PID({appPid})가 기대 PID({expectedPid})와 불일치");
+                    return new AttachResult(null, $"Application owner PID ({appPid}) does not match expected PID ({expectedPid})");
                 return new AttachResult(app, null);
             }
             catch (COMException ex) when (ComRetry.IsBusy(ex.HResult))
@@ -197,7 +197,7 @@ public static class ExcelAttach
             }
             catch (Exception ex)
             {
-                return new AttachResult(null, $"NATIVEOM → Application 획득 실패: {ex.Message}");
+                return new AttachResult(null, $"NATIVEOM → Application acquisition failed: {ex.Message}");
             }
         }
         return new AttachResult(null, lastError, busy);

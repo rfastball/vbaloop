@@ -47,21 +47,21 @@ public static class StatusCommand
                 : null;
 
         string freshness =
-            currentFingerprint == null ? "src 파일 없음"
-            : sync.LastPushFingerprint == null ? "push 이력 없음 (src가 미반영 상태일 수 있음)"
-            : srcDiffersFromPush == true ? "src가 마지막 push와 다름 (push 필요)"
-            : "src와 마지막 push 일치 (반영됨)";
+            currentFingerprint == null ? "no src files"
+            : sync.LastPushFingerprint == null ? "no push history (src may not be applied)"
+            : srcDiffersFromPush == true ? "src differs from last push (push required)"
+            : "src matches last push (applied)";
 
         var lease = LeaseService.Inspect(cfg);
 
         bool ephemeralMode = cfg.SessionMode == SessionMode.Ephemeral;
         o.HumanLines.Add($"session : {state}" + (marker != null ? $" ({marker.Describe()})"
             : info.Detail != null ? $" ({info.Detail})"
-            : ephemeralMode && info.State == SessionState.None ? " (일회용 모드 — 명령마다 숨은 Excel을 띄우고 닫음)" : ""));
+            : ephemeralMode && info.State == SessionState.None ? " (ephemeral mode — a hidden Excel is started and closed per command)" : ""));
         o.HumanLines.Add(LeaseCommand.DescribeState(lease));
-        o.HumanLines.Add($"workbook: {cfg.WorkbookPath}" + (File.Exists(cfg.WorkbookPath) ? "" : " (파일 없음!)"));
+        o.HumanLines.Add($"workbook: {cfg.WorkbookPath}" + (File.Exists(cfg.WorkbookPath) ? "" : " (file not found!)"));
         o.HumanLines.Add($"config  : {cfg.TomlPath}");
-        o.HumanLines.Add($"src     : {cfg.SrcRoot} (최종 수정 {Fmt(srcLastModified)})");
+        o.HumanLines.Add($"src     : {cfg.SrcRoot} (last modified {Fmt(srcLastModified)})");
         o.HumanLines.Add($"push    : {Fmt(lastPushAt)} — {freshness}");
         var stampState = ManagedStamp.Decide(ExeVersion.Current, cfg.ManagedBy);
         o.HumanLines.Add($"managed : {DescribeStamp(cfg.ManagedBy, stampState)}");
@@ -69,7 +69,7 @@ public static class StatusCommand
         if (marker != null)
             o.Hint = RecoveryGate.HintFor(marker);
         else if (info.State == SessionState.Busy)
-            o.Hint = "Excel에서 셀 편집/열린 대화상자를 마친 뒤 재시도";
+            o.Hint = "Excel is in cell edit mode or showing a dialog (the user is using it); retry shortly, and tell the user if it persists";
         else if (info.State is SessionState.Stale or SessionState.Poisoned
                  || (info.State == SessionState.None && !ephemeralMode))
             o.Hint = "session start";
@@ -121,9 +121,9 @@ public static class StatusCommand
     /// <summary>관리 스탬프 한 줄 요약(status/doctor 공용).</summary>
     public static string DescribeStamp(string? managedBy, StampState state) => state switch
     {
-        StampState.Unstamped => $"스탬프 없음 (exe {ExeVersion.Text}) - 다음 init이 기록",
-        StampState.ExeOlder => $"{managedBy} > exe {ExeVersion.Text} - exe가 더 오래됨, vbaloop update 필요",
-        StampState.Invalid => $"managed_by 값이 semver가 아님: {managedBy}",
+        StampState.Unstamped => $"no stamp (exe {ExeVersion.Text}) - next init will write it",
+        StampState.ExeOlder => $"{managedBy} > exe {ExeVersion.Text} - exe is older, vbaloop update required",
+        StampState.Invalid => $"managed_by value is not semver: {managedBy}",
         _ => $"{managedBy} (exe {ExeVersion.Text})",
     };
 

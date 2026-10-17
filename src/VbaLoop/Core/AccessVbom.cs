@@ -42,9 +42,9 @@ public static class AccessVbom
             var val = key.GetValue("AccessVBOM");
             if (val is int i)
                 return (i == 1, $"Office {v} AccessVBOM={i}", v);
-            return (false, $"Office {v} AccessVBOM 값 없음(기본 비활성)", v);
+            return (false, $"Office {v} AccessVBOM value missing (disabled by default)", v);
         }
-        return (false, "Office Excel Security 레지스트리 키를 찾지 못함", null);
+        return (false, "Office Excel Security registry key not found", null);
     }
 
     /// <summary>
@@ -55,16 +55,16 @@ public static class AccessVbom
     public static (bool Changed, string Detail) Enable(string? curVer)
     {
         var (ok, _, version) = Detect();
-        if (ok) return (false, "이미 활성");
+        if (ok) return (false, "already enabled");
 
         string target = version
             ?? VersionFromCurVer(curVer)
-            ?? throw new CliError("Office 버전을 판별하지 못해 AccessVBOM을 켤 수 없음",
-                "Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스'를 수동으로 체크");
+            ?? throw new CliError("Cannot enable AccessVBOM: Office version could not be determined",
+                "Manually check Excel Options > Trust Center > Macro Settings > 'Trust access to the VBA project object model'");
 
         using var key = Registry.CurrentUser.CreateSubKey(KeyPath(target), writable: true)
-            ?? throw new CliError($@"레지스트리 키를 만들 수 없음: HKCU\{KeyPath(target)}");
+            ?? throw new CliError($@"cannot create registry key: HKCU\{KeyPath(target)}");
         key.SetValue("AccessVBOM", 1, RegistryValueKind.DWord);
-        return (true, $"Office {target} AccessVBOM=1 기록");
+        return (true, $"Office {target} AccessVBOM=1 written");
     }
 }

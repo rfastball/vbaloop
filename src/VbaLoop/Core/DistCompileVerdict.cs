@@ -37,19 +37,19 @@ public static class DistCompileVerdict
         var texts = modalTexts.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
         if (modalTexts.Count > 0)
             return new Verdict(Kind.CompileError,
-                texts.Count > 0 ? string.Join(" || ", texts) : "VBE 컴파일 오류 모달(본문 수집 실패)");
+                texts.Count > 0 ? string.Join(" || ", texts) : "VBE compile error modal (failed to collect body text)");
         if (timedOut)
-            return new Verdict(Kind.CheckFailed, "컴파일 타임아웃 — 임시 Excel kill(모달 해제 실패 의심)");
+            return new Verdict(Kind.CheckFailed, "Compile timeout — temporary Excel killed (suspect modal dismissal failure)");
         if (!controlFound)
-            return new Verdict(Kind.CheckFailed, $"VBE 컴파일 컨트롤(Id {CompileControlId})을 찾지 못함");
+            return new Verdict(Kind.CheckFailed, $"VBE compile control (Id {CompileControlId}) not found");
         if (!enabledBefore)
             return new Verdict(Kind.AlreadyCompiled, null);
         if (executeError != null)
-            return new Verdict(Kind.CheckFailed, $"컴파일 명령 실행 실패: {executeError}");
+            return new Verdict(Kind.CheckFailed, $"Compile command failed: {executeError}");
         if (enabledAfter == null)
-            return new Verdict(Kind.Unverified, "컴파일 후 컨트롤 상태 조회 실패 — 오류 모달은 없었음");
+            return new Verdict(Kind.Unverified, "Failed to query control state after compile — no error modal appeared");
         if (enabledAfter == true)
-            return new Verdict(Kind.Unverified, "컴파일 후에도 컴파일 컨트롤이 활성 — 오류 모달은 없었음");
+            return new Verdict(Kind.Unverified, "Compile control still enabled after compile — no error modal appeared");
         return new Verdict(Kind.Compiled, null);
     }
 }

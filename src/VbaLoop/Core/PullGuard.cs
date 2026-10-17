@@ -12,6 +12,6 @@ public static class PullGuard
     {
         if (lastPush == null && lastPull == null) return null;
         if (current == lastPush || current == lastPull) return null;
-        return "src에 동기화되지 않은 편집이 있음(지문이 마지막 push/pull 어느 쪽과도 불일치)";
+        return "src has unsynced edits (fingerprint matches neither the last push nor the last pull)";
     }
 }

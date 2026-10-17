@@ -38,7 +38,7 @@ public static class BugReportCommand
             foreach (var r in reports)
                 o.HumanLines.Add($"[{(r.Resolved ? "resolved" : "open")}] {r.File} - {r.Title}");
             if (reports.Count == 0)
-                o.HumanLines.Add("리포트 없음");
+                o.HumanLines.Add("no reports");
             o.Payload = new
             {
                 dir = reportsDir,
@@ -50,8 +50,8 @@ public static class BugReportCommand
 
         var title = string.Join(" ", opts.Positional).Trim();
         if (title.Length == 0)
-            throw new CliError("bugreport 뒤에 제목 필요",
-                "예: vbaloop bugreport \"push가 X를 깨뜨림\" / 목록은 vbaloop bugreport --list");
+            throw new CliError("bugreport requires a title",
+                "Example: vbaloop bugreport \"push breaks X\" / list with vbaloop bugreport --list");
 
         // 보고자 = 프로젝트 폴더명 (toml이 있으면 그 위치 기준, 없으면 cwd 폴더명 폴백)
         var reporter = new DirectoryInfo(projectRoot).Name;
@@ -63,12 +63,12 @@ public static class BugReportCommand
             BugReport.BuildTemplate(title, date, reporter, VersionCommand.GetBuildInfo()),
             CanonicalText.Utf8NoBom);
 
-        o.HumanLines.Add($"생성됨: {path}");
-        o.HumanLines.Add("다음: 파일을 열어 TODO/괄호 자리를 채울 것 (증거는 명령과 --json 출력 원문)");
+        o.HumanLines.Add($"Created: {path}");
+        o.HumanLines.Add("Next: open the file and fill in the TODO/parenthesized spots (evidence = the commands and raw --json output)");
         string? issueUrl = upstream ? null : BugReport.NewIssueUrl(title);
         if (issueUrl != null)
         {
-            o.HumanLines.Add("작성 후 상류에 제보: 본문을 그대로 붙여넣으면 된다");
+            o.HumanLines.Add("After writing, report upstream: paste the body as is");
             o.HumanLines.Add($"  {issueUrl}");
         }
         o.Payload = new

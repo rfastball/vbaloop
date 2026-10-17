@@ -71,8 +71,8 @@ public static class VbaHeader
             {
                 if (strict && t.StartsWith("Attribute ", StringComparison.Ordinal))
                     throw new CliError(
-                        $"{sourceName}:{i + 1}: 코드 시작 이후 Attribute 라인 발견 — 프로시저 수준 속성은 이 경로로 왕복 불가",
-                        "해당 속성을 제거하거나 이 모듈만 수동 Export/Import로 관리");
+                        $"{sourceName}:{i + 1}: Attribute line found after code start — procedure-level attributes cannot round-trip via this path",
+                        "remove that attribute, or manage only this module via manual Export/Import");
                 body.Add(line);
             }
         }
@@ -110,8 +110,8 @@ public static class VbaHeader
             },
             VbaComponentKind.ClassModule => ClassHeader(name, predeclared: false, exposed: false),
             VbaComponentKind.Document => ClassHeader(name, predeclared: true, exposed: true),
-            _ => throw new CliError($"헤더 합성 불가 타입: {kind} ({name})",
-                "폼은 Export 경로로만 생성됨"),
+            _ => throw new CliError($"cannot synthesize header for type: {kind} ({name})",
+                "forms are created only via the Export path"),
         };
     }
 

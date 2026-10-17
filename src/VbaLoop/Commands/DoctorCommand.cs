@@ -38,8 +38,8 @@ public static class DoctorCommand
         string? curVer = Registry.ClassesRoot.OpenSubKey(@"Excel.Application\CurVer")
             ?.GetValue(null) as string;
         checks.Add(new Check("excel.com", progType != null,
-            progType != null ? $"Excel.Application 등록됨 ({curVer ?? "버전 미상"})" : "Excel.Application ProgID 없음",
-            progType == null ? "Excel 설치 필요" : null));
+            progType != null ? $"Excel.Application registered ({curVer ?? "version unknown"})" : "Excel.Application ProgID not found",
+            progType == null ? "Excel installation required" : null));
 
         // 2. VBIDE 신뢰 액세스 (AccessVBOM). --fix는 명시가 곧 승인(--kill-orphans와 같은 원칙) —
         //    보안 설정이라 기본 doctor는 절대 건드리지 않고 상태만 보고한다.
@@ -57,19 +57,19 @@ public static class DoctorCommand
             }
             catch (CliError e)
             {
-                vbomDetail += $" (--fix 실패: {e.Message})";
+                vbomDetail += $" (--fix failed: {e.Message})";
             }
         }
         checks.Add(new Check("excel.accessVBOM", vbomOk, vbomDetail,
             vbomOk ? null
-            : "vbaloop doctor --fix로 켜거나, Excel 옵션 > 보안 센터 > 매크로 설정 > 'VBA 프로젝트 개체 모델에 안전하게 액세스' 체크"));
+            : "Enable with vbaloop doctor --fix, or check Excel Options > Trust Center > Macro Settings > 'Trust access to the VBA project object model'"));
 
         // 3. oleacc.dll 기반 attach 가능 여부
         bool oleacc = NativeLibrary.TryLoad("oleacc.dll", out var oleaccHandle);
         if (oleacc) NativeLibrary.Free(oleaccHandle);
         checks.Add(new Check("attach.oleacc", oleacc,
-            oleacc ? "oleacc.dll 로드 가능" : "oleacc.dll 로드 실패",
-            oleacc ? null : "Windows 구성 손상 — oleacc.dll 확인"));
+            oleacc ? "oleacc.dll loadable" : "oleacc.dll failed to load",
+            oleacc ? null : "Windows installation damaged — check oleacc.dll"));
 
         // 4. .NET 런타임 / 비트니스
         string arch = RuntimeInformation.ProcessArchitecture.ToString();
@@ -80,12 +80,12 @@ public static class DoctorCommand
         bool bitnessKnown = excelBitness != null;
         checks.Add(new Check("excel.bitness", true,
             bitnessKnown
-                ? $"Excel {excelBitness} / 도구 {arch} (out-of-proc COM이라 불일치도 동작하나 참고용)"
-                : "Excel 비트니스 레지스트리에서 판별 불가(참고용)"));
+                ? $"Excel {excelBitness} / tool {arch} (out-of-proc COM, so a mismatch still works; informational)"
+                : "Excel bitness cannot be determined from the registry (informational)"));
 
         // 5. 시스템 ACP (코드페이지 하드코딩 금지 원칙의 실측값)
         int acp = NativeMethods.GetACP();
-        checks.Add(new Check("system.acp", true, $"ACP={acp}" + (acp == 949 ? " (CP949 한국어)" : "")));
+        checks.Add(new Check("system.acp", true, $"ACP={acp}" + (acp == 949 ? " (CP949 Korean)" : "")));
 
         // 5b. PATH shim 등록 상태. 정보성 — 항상 Ok(게이트/errors 비오염),
         //     상태는 Detail로만 안내. 등록은 rollout.ps1이 %LOCALAPPDATA%\vbaloop\bin에 수행.
@@ -98,11 +98,11 @@ public static class DoctorCommand
         string exeDirForRepo = Environment.ProcessPath != null
             ? Path.GetDirectoryName(Environment.ProcessPath)! : Environment.CurrentDirectory;
         string reinstallHint = RepoLocator.FindRepoRoot(exeDirForRepo) != null
-            ? "rollout.ps1 실행" : "vbaloop setup 실행";
+            ? "run rollout.ps1" : "run vbaloop setup";
         checks.Add(new Check("path.shim", true,
-            (shimOnPath && shimExe) ? $"{shimDir} 등록됨"
-            : shimOnPath ? $"{shimDir} PATH에 있으나 vbaloop.exe 없음 — {reinstallHint}"
-            : $"{shimDir} 미등록 — {reinstallHint} 시 자동 등록"));
+            (shimOnPath && shimExe) ? $"{shimDir} registered"
+            : shimOnPath ? $"{shimDir} is on PATH but vbaloop.exe is missing — {reinstallHint}"
+            : $"{shimDir} not registered — registered automatically on {reinstallHint}"));
 
         // 프로젝트 컨텍스트(있을 때만): 고아 스캔의 세션 제외와 워크북 잠금 체크가 공유
         ProjectConfig? cfg = null;
@@ -126,8 +126,8 @@ public static class DoctorCommand
                 stampState switch
                 {
                     StampState.ExeOlder => ManagedStamp.UpdateHint,
-                    StampState.Unstamped => "vbaloop init (스탬프 기록)",
-                    StampState.Invalid => "vbaloop.toml의 managed_by 줄 확인",
+                    StampState.Unstamped => "vbaloop init (writes the stamp)",
+                    StampState.Invalid => "Check the managed_by line in vbaloop.toml",
                     _ => null,
                 }));
         }
@@ -136,7 +136,7 @@ public static class DoctorCommand
         RecoveryMarker? marker = cfg != null ? RecoveryMarker.Load(cfg.RecoveryMarkerPath) : null;
         if (cfg != null)
             checks.Add(new Check("session.recovery", true,
-                marker == null ? "격리 없음" : marker.Describe(),
+                marker == null ? "no quarantine" : marker.Describe(),
                 marker == null ? null : RecoveryGate.HintFor(marker)));
 
         // 6. 고아 Excel 후보: 창 없는 EXCEL.EXE. 기본은 리포트만 — --kill-orphans는 사용자 승인이고,
@@ -148,12 +148,12 @@ public static class DoctorCommand
         int killable = orphans.Count(z => z.Killable);
         checks.Add(new Check("excel.orphans", true,
             orphans.Count == 0
-                ? "창 없는 고아 EXCEL 프로세스 없음"
-                : $"창 없는 EXCEL 프로세스 {orphans.Count}개(정리 대상 {killable}개: 현재 세션·/automation·비격리)"
-                  + (opts.KillOrphans || killable == 0 ? "" : " — 정리는 사용자 확인 후에만 vbaloop doctor --kill-orphans")));
+                ? "no windowless orphan EXCEL processes"
+                : $"{orphans.Count} windowless EXCEL processes ({killable} to clean up: not current session, /automation, not quarantined)"
+                  + (opts.KillOrphans || killable == 0 ? "" : " — clean up only after the user confirms: vbaloop doctor --kill-orphans")));
         foreach (var z in orphans)
             checks.Add(new Check($"excel.orphans.{z.Pid}", true,
-                $"PID {z.Pid} (시작 {z.StartTime ?? "미상"}) {z.Action} — {z.Reason}"));
+                $"PID {z.Pid} (started {z.StartTime ?? "unknown"}) {z.Action} — {z.Reason}"));
 
         // 7. 대상 워크북 쓰기 잠금: 잠긴 채 session start하면 조용히 read-only로 열려
         //    Save가 SaveAs 오탈출한다. 고아 스캔 뒤에 배치해 교차 안내.
@@ -196,8 +196,8 @@ public static class DoctorCommand
     private static Check CheckWorkbookLock(ProjectConfig cfg, SessionMeta? meta, List<Orphan> orphans)
     {
         if (!File.Exists(cfg.WorkbookPath))
-            return new Check("workbook.lock", false, $"워크북 파일 없음: {cfg.WorkbookPath}",
-                "vbaloop.toml의 [excel].workbook 경로 확인");
+            return new Check("workbook.lock", false, $"workbook file not found: {cfg.WorkbookPath}",
+                "Check the [excel].workbook path in vbaloop.toml");
 
         string? lockError;
         try
@@ -209,18 +209,18 @@ public static class DoctorCommand
         catch (UnauthorizedAccessException ex) { lockError = ex.Message; }
 
         if (lockError == null)
-            return new Check("workbook.lock", true, "대상 워크북 쓰기 잠금 없음");
+            return new Check("workbook.lock", true, "no write lock on the target workbook");
 
         bool sessionAlive = meta != null && ProcessIdentity.IsAlive(meta.Pid, meta.ExcelStartTime);
         if (sessionAlive)
-            return new Check("workbook.lock", true, $"잠금 보유: 현재 세션(정상, PID {meta!.Pid})");
+            return new Check("workbook.lock", true, $"lock held by: current session (normal, PID {meta!.Pid})");
 
         var killableOrphans = orphans.Where(z => z.Killable).Select(z => z.Pid).ToList();
         string hint = killableOrphans.Count > 0
-            ? $"창 없는 자동화 EXCEL(PID {string.Join(", ", killableOrphans)})이 잠금 보유 의심 — 사용자 확인 후 vbaloop doctor --kill-orphans"
-            : "Excel/타 프로세스에서 대상 파일을 닫을 것";
+            ? $"Windowless automation EXCEL (PID {string.Join(", ", killableOrphans)}) suspected of holding the lock — after the user confirms, run vbaloop doctor --kill-orphans"
+            : "Ask the user to close the target file in Excel or the other process";
         return new Check("workbook.lock", false,
-            $"쓰기 잠금 보유 프로세스 존재 — session start가 read-only 거부(exit 3)로 실패하게 됨: {lockError}",
+            $"A process holds the write lock — session start will fail with a read-only rejection (exit 3): {lockError}",
             hint);
     }
 
@@ -278,7 +278,7 @@ public static class DoctorCommand
                     }
                     catch (Exception ex)
                     {
-                        action = $"kill 실패: {ex.Message}";
+                        action = $"kill failed: {ex.Message}";
                     }
                 }
                 result.Add(new Orphan(proc.Id, started, action, verdict.Killable, toolLaunched, verdict.Reason));

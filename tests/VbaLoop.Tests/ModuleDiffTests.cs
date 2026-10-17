@@ -215,7 +215,7 @@ public class ModuleDiffTests
         Assert.Equal("casingOnly", e.Verdict);
         Assert.False(e.Detail!.FormatOnly);
         Assert.Equal(3, e.Detail.FirstDiffLine);
-        Assert.Contains("케이싱", e.Note);
+        Assert.Contains("casing", e.Note);
     }
 
     [Fact]

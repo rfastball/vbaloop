@@ -78,7 +78,7 @@ public class ManagedStampTests
         var toml = Onboarding.BuildTomlScaffold("P", "Book.xlsm");
         var updated = ManagedStamp.Upsert(toml, "0.3.0");
         Assert.StartsWith(toml.TrimEnd(), updated);
-        Assert.EndsWith("[vbaloop]\r\n# 관리 파일을 마지막으로 쓴 vbaloop 버전. vbaloop init이 기록한다 - 직접 수정 금지\r\nmanaged_by = \"0.3.0\"\r\n", updated);
+        Assert.EndsWith("[vbaloop]\r\n# vbaloop version that last wrote the managed files. Recorded by vbaloop init - do not edit directly\r\nmanaged_by = \"0.3.0\"\r\n", updated);
         Assert.Equal("0.3.0", ManagedStamp.Read(updated));
     }
 
@@ -143,7 +143,7 @@ public class ManagedStampTests
         var path = t.File("vbaloop.toml", toml);
         var e = Assert.Throws<CliError>(() => ProjectConfig.Load(path, t.Path));
         Assert.False(e.Environment);
-        Assert.Contains("미지 섹션", e.Message);
+        Assert.Contains("unknown section", e.Message);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class ManagedStampTests
 
         var check = InitCommand.Run(CliArgs.Parse(new[] { "--config", path, "--check" }));
         Assert.Equal(2, check.ExitCode);                                     // 스탬프 없음 = 드리프트
-        Assert.Contains(check.HumanLines, l => l.Contains("vbaloop.toml") && l.Contains("기록"));
+        Assert.Contains(check.HumanLines, l => l.Contains("vbaloop.toml") && l.Contains("recorded"));
 
         var apply = InitCommand.Run(CliArgs.Parse(new[] { "--config", path }));
         Assert.True(apply.Ok);

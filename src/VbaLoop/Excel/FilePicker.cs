@@ -63,7 +63,7 @@ public static class FilePicker
                 // 콘솔 창을 소유자로 — 대화상자가 마법사 창 뒤에 숨지 않게 한다
                 hwndOwner = GetConsoleWindow(),
                 // 필터는 "표시명\0패턴\0...\0\0" — 문자열 마샬링은 내장 NUL을 보존한다
-                lpstrFilter = "Excel 매크로 사용 통합 문서 (*.xlsm)\0*.xlsm\0",
+                lpstrFilter = "Excel Macro-Enabled Workbook (*.xlsm)\0*.xlsm\0",
                 nFilterIndex = 1,
                 lpstrFile = buffer,
                 nMaxFile = MaxPath,

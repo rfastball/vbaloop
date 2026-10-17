@@ -95,7 +95,7 @@ public class VbaProjectOpsTests
         {
             VbaProjectOps.ReplaceCode(cm, new[] { "Sub A()", "End Sub" });
         });
-        Assert.Contains("논리행수 불일치", ex.Message);
+        Assert.Contains("logical line count mismatch", ex.Message);
         Assert.Empty(fake.L); // 최초 빈 모듈로 원복
     }
 }

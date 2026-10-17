@@ -19,7 +19,7 @@ public static class LintChecks
         var findings = new List<Finding>();
         if (!Directory.Exists(srcRoot))
         {
-            findings.Add(new Finding(srcRoot, null, "SRC_MISSING", "src 루트가 없음"));
+            findings.Add(new Finding(srcRoot, null, "SRC_MISSING", "src root not found"));
             return findings;
         }
 
@@ -38,7 +38,7 @@ public static class LintChecks
             if (group.Count() > 1)
                 findings.Add(new Finding(
                     string.Join(", ", group.Select(Path.GetFileName)), null, "BASENAME_CONFLICT",
-                    $"컴포넌트 이름 충돌: {group.Key} — VBA 이름 공간은 확장자를 구분하지 않음"));
+                    $"component name collision: {group.Key} — the VBA namespace does not distinguish extensions"));
         }
 
         // frm↔frx 짝
@@ -51,13 +51,13 @@ public static class LintChecks
             if (!frxFiles.Any(x => Path.GetFileNameWithoutExtension(x)
                     .Equals(frm, StringComparison.OrdinalIgnoreCase)))
                 findings.Add(new Finding(frm + ".frm", null, "FRX_MISSING",
-                    "짝이 되는 .frx가 없음 — 폼 Import 불가"));
+                    "no matching .frx — form Import impossible"));
         }
         foreach (var frx in frxFiles)
         {
             if (!frmBases.Contains(Path.GetFileNameWithoutExtension(frx)))
                 findings.Add(new Finding(Path.GetFileName(frx), null, "FRX_ORPHAN",
-                    "짝이 되는 .frm이 없는 고아 .frx"));
+                    "orphan .frx with no matching .frm"));
         }
 
         foreach (var file in sourceFiles)
@@ -73,7 +73,7 @@ public static class LintChecks
 
         // ---- raw 바이트 규약 검사 (UTF-8 BOM 없음 + CRLF + EOF 개행 정확히 1개) ----
         if (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF)
-            findings.Add(new Finding(name, 1, "BOM", "UTF-8 BOM 존재 — 규약은 BOM 없음"));
+            findings.Add(new Finding(name, 1, "BOM", "UTF-8 BOM present — convention is no BOM"));
 
         int loneLfAt = -1, bareCrAt = -1;
         for (int i = 0; i < raw.Length; i++)
@@ -83,24 +83,24 @@ public static class LintChecks
         }
         if (loneLfAt >= 0)
             findings.Add(new Finding(name, LineOf(raw, loneLfAt), "EOL_LF",
-                "CR 없는 LF 개행 — 규약은 CRLF"));
+                "LF line ending without CR — convention is CRLF"));
         if (bareCrAt >= 0)
             findings.Add(new Finding(name, LineOf(raw, bareCrAt), "EOL_CR",
-                "LF 없는 단독 CR — 규약은 CRLF"));
+                "lone CR without LF — convention is CRLF"));
 
         // 끝 개행 "부재"만 위반 — 본문 끝 빈 줄(모듈의 정당한 내용)은 이중 CRLF로
         // 직렬화되므로 개수 상한 검사는 위양성이 된다(Test_Project 실측)
         bool endsWithCrlf = raw.Length >= 2 && raw[^2] == 0x0D && raw[^1] == 0x0A;
         if (!endsWithCrlf)
             findings.Add(new Finding(name, null, "EOF_NEWLINE",
-                raw.Length == 0 ? "빈 파일" : "파일 끝 CRLF 개행 부재"));
+                raw.Length == 0 ? "empty file" : "missing CRLF line ending at end of file"));
 
         // ---- 텍스트 계층 검사 (push 가드 재사용) ----
         var lines = CanonicalText.SplitLines(CanonicalText.ReadFileStripBom(file));
 
         foreach (var v in Cp949Guard.Check(lines, codePage))
             findings.Add(new Finding(name, v.Line, "ENCODING",
-                $"{v.Column}열 '{v.Char}' ({v.CodePoint}) — CP{codePage} 표현 불가, push 시 확정 손실"));
+                $"column {v.Column} '{v.Char}' ({v.CodePoint}) — not representable in CP{codePage}, definitively lost on push"));
 
         IReadOnlyList<string> header;
         try
@@ -118,10 +118,10 @@ public static class LintChecks
         string baseName = Path.GetFileNameWithoutExtension(file);
         if (vbName == null)
             findings.Add(new Finding(name, null, "NAME_MISSING",
-                "Attribute VB_Name 헤더가 없음 — Export 호환 포맷 아님"));
+                "Attribute VB_Name header missing — not an Export-compatible format"));
         else if (!vbName.Equals(baseName, StringComparison.OrdinalIgnoreCase))
             findings.Add(new Finding(name, null, "NAME_MISMATCH",
-                $"VB_Name(\"{vbName}\")과 파일명(\"{baseName}\") 불일치 — push는 파일명으로 매칭함"));
+                $"VB_Name(\"{vbName}\") and file name (\"{baseName}\") mismatch — push matches by file name"));
     }
 
     private static int LineOf(byte[] raw, int offset)

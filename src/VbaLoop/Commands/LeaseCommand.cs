@@ -12,14 +12,14 @@ public static class LeaseCommand
     public static Outcome Run(CliArgs opts)
     {
         string sub = opts.Positional.FirstOrDefault()
-            ?? throw new CliError("lease 하위 명령 필요", "lease acquire|release|status|break --force");
+            ?? throw new CliError("lease subcommand required", "lease acquire|release|status|break --force");
         return sub switch
         {
             "acquire" => Acquire(opts),
             "release" => Release(opts),
             "status" => Status(opts),
             "break" => Break(opts),
-            _ => throw new CliError($"미지 lease 하위 명령: {sub}",
+            _ => throw new CliError($"Unknown lease subcommand: {sub}",
                 "lease acquire|release|status|break --force"),
         };
     }
@@ -34,8 +34,8 @@ public static class LeaseCommand
         var outcome = LeaseService.AcquireOrRenew(cfg, "lease acquire", log);
         var state = LeaseService.Inspect(cfg);
         o.HumanLines.Add(outcome == LeaseService.AcquireOutcome.Claimed
-            ? $"lease 획득: {state.Owner?.OwnerThread}"
-            : $"lease 갱신 (이미 보유): {state.Owner?.OwnerThread}");
+            ? $"lease acquired: {state.Owner?.OwnerThread}"
+            : $"lease renewed (already held): {state.Owner?.OwnerThread}");
         o.Payload = new
         {
             action = outcome.ToString().ToLowerInvariant(),
@@ -56,7 +56,7 @@ public static class LeaseCommand
         var state = LeaseService.Inspect(cfg);
         if (state.Owner == null && !state.FilePresent)
         {
-            o.HumanLines.Add("lease 없음 (no-op)");
+            o.HumanLines.Add("no lease (no-op)");
             o.Payload = new { action = "none" };
             return o;
         }
@@ -64,13 +64,13 @@ public static class LeaseCommand
         {
             // release는 owner만 가능 — 타 소유자 제거는 break --force가 유일 수단
             o.Payload = new { action = "refused", ownerThread = state.Owner?.OwnerThread };
-            o.Fail($"내 lease가 아님: {state.Owner?.OwnerThread ?? "(owner 판독 불가)"}",
-                "타 소유자 lease 제거는 vbaloop lease break --force");
+            o.Fail($"Not my lease: {state.Owner?.OwnerThread ?? "(owner unreadable)"}",
+                "To remove another owner's lease use vbaloop lease break --force");
             return o;
         }
         LeaseFile.Delete(LeaseFile.PathFor(cfg));
         log.Write("info", "lease_released", new { ownerThread = state.Owner!.OwnerThread });
-        o.HumanLines.Add("lease 해제됨");
+        o.HumanLines.Add("lease released");
         o.Payload = new { action = "released" };
         return o;
     }
@@ -106,18 +106,18 @@ public static class LeaseCommand
         o.LogRecords = log.Records;
 
         if (!opts.Force)
-            throw new CliError("lease break는 소유권을 무시하고 강제 제거함", "--force로 의사를 명시");
+            throw new CliError("lease break removes the lease regardless of ownership", "Pass --force to confirm intent");
 
         var state = LeaseService.Inspect(cfg);
         if (!state.FilePresent)
         {
-            o.HumanLines.Add("lease 없음 (no-op)");
+            o.HumanLines.Add("no lease (no-op)");
             o.Payload = new { action = "none" };
             return o;
         }
         LeaseFile.Delete(LeaseFile.PathFor(cfg));
         log.Write("warn", "lease_broken", new { prevOwner = state.Owner?.OwnerThread });
-        o.HumanLines.Add($"lease 강제 제거됨 (이전 소유: {state.Owner?.OwnerThread ?? "판독 불가"})");
+        o.HumanLines.Add($"lease force-removed (previous owner: {state.Owner?.OwnerThread ?? "unreadable"})");
         o.Payload = new { action = "broken", prevOwner = state.Owner?.OwnerThread };
         return o;
     }
@@ -125,9 +125,9 @@ public static class LeaseCommand
     public static string DescribeState(LeaseService.LeaseState state)
     {
         if (state.Owner == null)
-            return state.FilePresent ? "lease   : 파일은 있으나 판독 불가 (회수 대상)" : "lease   : 없음";
+            return state.FilePresent ? "lease   : file present but unreadable (reclaimable)" : "lease   : none";
         string idle = double.IsNaN(state.IdleSeconds) ? "?" : $"{(int)state.IdleSeconds}s";
-        string kind = state.Mine ? "내 소유" : state.Reclaimable ? "타 소유(회수 가능)" : "타 소유(활성)";
-        return $"lease   : {kind} — {state.Owner.OwnerThread} (유휴 {idle}, 마지막 {state.Owner.LastCommand})";
+        string kind = state.Mine ? "mine" : state.Reclaimable ? "other's (reclaimable)" : "other's (active)";
+        return $"lease   : {kind} — {state.Owner.OwnerThread} (idle {idle}, last {state.Owner.LastCommand})";
     }
 }

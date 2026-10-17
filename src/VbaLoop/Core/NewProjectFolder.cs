@@ -25,15 +25,15 @@ public static class NewProjectFolder
     {
         string name = raw.Trim().Trim('"').Trim();
         if (name.Length == 0)
-            throw new CliError("프로젝트 이름이 비어 있음", "vbaloop setup --new <이름>");
+            throw new CliError("Project name is empty", "vbaloop setup --new <name>");
         if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new CliError($"프로젝트 이름에 쓸 수 없는 문자가 있음: {name}",
-                "폴더 이름으로 쓸 수 있는 이름만 가능 (\\ / : * ? \" < > | 제외)");
+            throw new CliError($"Project name contains invalid characters: {name}",
+                "Use a valid folder name (\\ / : * ? \" < > | not allowed)");
         if (name is "." or ".." || name.EndsWith('.'))
-            throw new CliError($"프로젝트 이름은 점으로 끝날 수 없음: {name}", "다른 이름으로 다시 실행");
+            throw new CliError($"Project name cannot end with a dot: {name}", "Rerun with a different name");
         // 장치 이름은 확장자가 붙어도 예약이다(CON.foo, LPT1.test) — 첫 점 앞부분(끝 공백 무시)으로 판정
         if (ReservedNames.Contains(name.Split('.')[0].TrimEnd(' ')))
-            throw new CliError($"Windows 예약 이름은 쓸 수 없음: {name}", "다른 이름으로 다시 실행");
+            throw new CliError($"Windows reserved name cannot be used: {name}", "Rerun with a different name");
         return name;
     }
 
@@ -45,8 +45,8 @@ public static class NewProjectFolder
     {
         string folder = Path.GetFullPath(Path.Combine(parent, ValidateName(name)));
         if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
-            throw new CliError($"같은 이름의 폴더가 이미 있음: {folder}",
-                $"다른 이름을 쓰거나, 그 폴더로 이어서 진행하려면 vbaloop setup --folder \"{folder}\"");
+            throw new CliError($"A folder with the same name already exists: {folder}",
+                $"Use a different name, or to continue with that folder run vbaloop setup --folder \"{folder}\"");
         return folder;
     }
 }

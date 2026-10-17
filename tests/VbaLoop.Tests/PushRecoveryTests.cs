@@ -50,8 +50,8 @@ public class PushRecoveryTests
     }
 
     [Theory]
-    [InlineData(TouchKind.FormReimported, "frmMain(폼 재Import)")]
-    [InlineData(TouchKind.ComponentPruned, "frmMain(prune 삭제)")]
+    [InlineData(TouchKind.FormReimported, "frmMain(form re-Import)")]
+    [InlineData(TouchKind.ComponentPruned, "frmMain(prune delete)")]
     public void UnrestorableTouch_PoisonsWithoutAttemptingRestore(TouchKind kind, string label)
     {
         var touches = new[] { T("modA", TouchKind.CodeReplaced), T("frmMain", kind) };
@@ -104,8 +104,8 @@ public class PushRecoveryTests
     public void Describe_Restored_MentionsCountAndRollbackWithBackupId()
     {
         var (summary, hint) = Describe(WorkbookState.Restored, 3, "20261017-031500-123-push", null);
-        Assert.Contains("3개", summary);
-        Assert.Contains("저장 안 함", summary);
+        Assert.Contains("all 3 modules", summary);
+        Assert.Contains("not saved", summary);
         Assert.Contains("rollback --latest", hint);
         Assert.Contains("20261017-031500-123-push", hint);
         Assert.Contains("--no-save", hint);
@@ -116,7 +116,7 @@ public class PushRecoveryTests
     {
         var (summary, hint) = Describe(WorkbookState.Poisoned, 0, "20261017-031500-123-push", "원복 실패: modA");
         Assert.Contains("poison", summary);
-        Assert.Contains("이번 push 이전 상태", summary);
+        Assert.Contains("pre-push state", summary);
         Assert.Contains("원복 실패: modA", summary);
         Assert.DoesNotContain("원복·검증됨", summary);
         Assert.Contains("rollback --latest", hint);
@@ -134,7 +134,7 @@ public class PushRecoveryTests
     public void Describe_Untouched_NoRollbackNoise()
     {
         var (summary, hint) = Describe(WorkbookState.Untouched, 0, "id", null);
-        Assert.Contains("변경 없음", summary);
+        Assert.Contains("workbook unchanged", summary);
         Assert.DoesNotContain("rollback", hint);
     }
 

@@ -61,7 +61,7 @@ public static class PushRecovery
     {
         if (phase == Phase.Integrity)
             return new Plan(Array.Empty<Touch>(), true,
-                "무결성 체크 실패 — 메모리 워크북 상태를 신뢰할 수 없음");
+                "integrity check failed — in-memory workbook state cannot be trusted");
         if (touches.Count == 0)
             return new Plan(Array.Empty<Touch>(), false, null);
 
@@ -69,7 +69,7 @@ public static class PushRecovery
         var unrestorable = collapsed.Where(t => !IsRestorable(t.Kind)).ToList();
         if (unrestorable.Count > 0)
             return new Plan(Array.Empty<Touch>(), true,
-                "스냅샷으로 되돌릴 수 없는 변경: " +
+                "changes that cannot be rolled back from the snapshot: " +
                 string.Join(", ", unrestorable.Select(t => $"{t.Module}({Label(t.Kind)})")));
 
         return new Plan(collapsed.AsEnumerable().Reverse().ToList(), false, null);
@@ -87,21 +87,21 @@ public static class PushRecovery
         WorkbookState state, int restoredCount, string? backupId, string? poisonReason)
     {
         string rollback = backupId != null
-            ? $"vbaloop rollback --latest(push 직전 백업 {backupId})"
-            : "rollback 불가([backup] keep = 0으로 백업 비활성)";
+            ? $"vbaloop rollback --latest (pre-push backup {backupId})"
+            : "rollback unavailable (backup disabled by [backup] keep = 0)";
         return state switch
         {
             WorkbookState.Untouched => (
-                "워크북 변경 없음(저장 안 함)",
-                "원인 해결 후 재시도"),
+                "workbook unchanged (not saved)",
+                "fix the cause, then retry"),
             WorkbookState.Restored => (
-                $"이번 push가 건드린 모듈 {restoredCount}개 전부 스냅샷으로 원복·검증됨(메모리, 저장 안 함)",
-                $"원인 해결 후 재시도. 워크북이 의심되면 session stop --no-save 후 {rollback}"),
+                $"all {restoredCount} modules touched by this push rolled back to the snapshot and verified (in memory, not saved)",
+                $"fix the cause, then retry. If the workbook is suspect, run session stop --no-save, then {rollback}"),
             _ => (
-                "메모리 워크북이 혼합 상태라 세션을 poison 처리함 — 저장하지 않으며, 디스크 정본은 이번 push 이전 상태 그대로" +
+                "in-memory workbook is in a mixed state, so the session is poisoned — not saved; the canonical workbook on disk is still in its pre-push state" +
                 (poisonReason != null ? $" ({poisonReason})" : ""),
-                "다음 명령이 세션 Excel을 저장 없이 재기동해 디스크 정본을 다시 연다(세션 창의 저장 안 된 편집은 버려짐). " +
-                $"디스크 정본까지 의심되면 vbaloop session stop 후 {rollback}"),
+                "The next command restarts the session Excel without saving and reopens the canonical workbook from disk (unsaved edits in the session window are discarded). " +
+                $"If the canonical workbook on disk is also suspect, run vbaloop session stop, then {rollback}"),
         };
     }
 
@@ -143,10 +143,10 @@ public static class PushRecovery
 
     private static string Label(TouchKind k) => k switch
     {
-        TouchKind.CodeReplaced => "본문 교체",
-        TouchKind.ComponentAdded => "신규 생성",
-        TouchKind.FormReimported => "폼 재Import",
-        TouchKind.ComponentPruned => "prune 삭제",
+        TouchKind.CodeReplaced => "body replaced",
+        TouchKind.ComponentAdded => "newly created",
+        TouchKind.FormReimported => "form re-Import",
+        TouchKind.ComponentPruned => "prune delete",
         _ => k.ToString(),
     };
 }

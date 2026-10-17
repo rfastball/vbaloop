@@ -93,14 +93,14 @@ public static class BackupStore
             Directory.CreateDirectory(dir);
             return new Slot(id, dir, kind, t, Path.Combine(dir, Path.GetFileName(workbookPath)));
         }
-        throw new CliError($"백업 슬롯 할당 실패(id 충돌 지속): {root}");
+        throw new CliError($"backup slot allocation failed (id collisions persist): {root}");
     }
 
     /// <summary>사본이 기록된 슬롯을 완결: 크기/해시를 채워 metadata.json을 원자 기록.</summary>
     public static Metadata Complete(Slot slot, Metadata partial)
     {
         if (!File.Exists(slot.CopyPath))
-            throw new CliError($"백업 사본이 기록되지 않음: {slot.CopyPath}");
+            throw new CliError($"backup copy was not written: {slot.CopyPath}");
         partial.Id = slot.Id;
         partial.Kind = slot.Kind;
         partial.CreatedAtUtc = slot.CreatedUtc.ToString("o", CultureInfo.InvariantCulture);
@@ -164,24 +164,24 @@ public static class BackupStore
     public static Entry Select(IReadOnlyList<Entry> newestFirst, bool latest, string? id)
     {
         if (latest == (id != null))
-            throw new CliError("rollback 대상은 --latest 또는 --backup <id> 중 하나만 지정",
-                "vbaloop rollback --list로 백업 목록 확인");
+            throw new CliError("Specify only one rollback target: --latest or --backup <id>",
+                "Check the backup list with vbaloop rollback --list");
 
         if (latest)
             return newestFirst.FirstOrDefault(e => e.Complete)
-                ?? throw new CliError("복원 가능한 백업이 없음",
-                    "push가 백업을 만든다([backup] keep = 0이면 비활성) — vbaloop rollback --list로 확인");
+                ?? throw new CliError("no restorable backup",
+                    "push creates backups (disabled if [backup] keep = 0) — check with vbaloop rollback --list");
 
         var hit = newestFirst.FirstOrDefault(e => e.Id == id);
         if (hit == null)
         {
             var known = newestFirst.Where(e => e.Complete).Take(5).Select(e => e.Id).ToList();
-            throw new CliError($"백업 id 없음: {id}",
-                known.Count > 0 ? $"최근 백업: {string.Join(", ", known)} (전체는 rollback --list)" : "백업이 하나도 없음");
+            throw new CliError($"backup id not found: {id}",
+                known.Count > 0 ? $"Recent backups: {string.Join(", ", known)} (all: rollback --list)" : "no backups at all");
         }
         if (!hit.Complete)
-            throw new CliError($"백업 {id}는 미완(metadata.json 또는 사본 없음) — 복원 불가",
-                "다른 백업을 선택 (rollback --list)");
+            throw new CliError($"Backup {id} is incomplete (metadata.json or copy missing) — cannot restore",
+                "Choose another backup (rollback --list)");
         return hit;
     }
 

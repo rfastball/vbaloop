@@ -20,7 +20,7 @@ internal static class ComFailureGuard
         {
             var (res, marker, why) = RecoveryGate.Resolve(cfg, meta, "poison", ex.Message, meta.LastCommand, log);
             throw new CliError(
-                $"치명적 COM 오류로 세션을 오염 처리함: {ex.Message} — {RecoveryGate.Explain(res, marker, why)}",
+                $"Session marked poisoned by fatal COM error: {ex.Message} — {RecoveryGate.Explain(res, marker, why)}",
                 RecoveryGate.HintAfter(res, marker), environment: true);
         }
     }

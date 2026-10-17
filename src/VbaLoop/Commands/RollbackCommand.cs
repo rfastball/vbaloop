@@ -20,8 +20,8 @@ public static class RollbackCommand
 
         int forms = (opts.List ? 1 : 0) + (opts.Latest ? 1 : 0) + (opts.Backup != null ? 1 : 0);
         if (forms != 1)
-            throw new CliError("rollback 형식: --list | --latest | --backup <id> 중 정확히 하나",
-                "vbaloop rollback --list로 백업 목록부터 확인");
+            throw new CliError("rollback format: exactly one of --list | --latest | --backup <id>",
+                "Check the backup list first with vbaloop rollback --list");
 
         if (opts.List) return List(o, cfg);
 
@@ -33,8 +33,8 @@ public static class RollbackCommand
         if (block != null)
         {
             log.Write("warn", "rollback_refused_session", new { reason = block });
-            throw new CliError($"rollback 거부: {block}",
-                "vbaloop session stop 후 재시도 (push 실패 직후라면 --no-save 권장: session stop --no-save)",
+            throw new CliError($"rollback refused: {block}",
+                "Run vbaloop session stop, then retry (right after a push failure, prefer --no-save: session stop --no-save)",
                 environment: true);
         }
 
@@ -42,12 +42,12 @@ public static class RollbackCommand
         var meta = target.Meta!;
         if (!PathDrift.SamePath(meta.WorkbookPath, cfg.WorkbookPath))
             throw new CliError(
-                $"백업 {target.Id}는 다른 워크북의 것: {meta.WorkbookPath} (현재 정본: {cfg.WorkbookPath})",
-                "vbaloop.toml의 [excel].workbook이 바뀌었는지 확인 — 다른 파일로의 복원은 지원하지 않음");
+                $"Backup {target.Id} belongs to a different workbook: {meta.WorkbookPath} (current canonical workbook: {cfg.WorkbookPath})",
+                "Check whether [excel].workbook in vbaloop.toml changed — restoring to a different file is not supported");
 
         if (WorkbookRollback.IsLocked(cfg.WorkbookPath))
-            throw new CliError($"워크북이 다른 프로세스에 열려 있음: {cfg.WorkbookPath}",
-                "그 Excel 창을 닫거나 vbaloop doctor로 잠금 프로세스 확인 후 재시도", environment: true);
+            throw new CliError($"workbook is open in another process: {cfg.WorkbookPath}",
+                "Ask the user to close that Excel window, or find the locking process with vbaloop doctor, then retry", environment: true);
 
         var warnings = new List<string>();
         var sync = SyncCache.Load(SyncCache.PathFor(cfg));
@@ -74,15 +74,15 @@ public static class RollbackCommand
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CliError)
             {
                 BackupStore.Discard(slot);
-                throw new CliError($"pre-rollback 안전 백업 실패 — 복원하지 않음: {ex.Message}",
-                    "_dbg 쓰기 권한/디스크 여유 확인");
+                throw new CliError($"pre-rollback safety backup failed — not restoring: {ex.Message}",
+                    "Check _dbg write permission/free disk space");
             }
             safetyId = slot.Id;
             log.Write("info", "rollback_safety_backup", new { id = safetyId });
         }
         else
         {
-            warnings.Add($"정본 워크북이 없어 안전 백업 없이 복원함: {cfg.WorkbookPath}");
+            warnings.Add($"canonical workbook missing, restored without a safety backup: {cfg.WorkbookPath}");
         }
 
         WorkbookRollback.ReplaceWorkbook(target.WorkbookCopyPath!, meta.Sha256, cfg.WorkbookPath);
@@ -98,16 +98,16 @@ public static class RollbackCommand
         if (failed.Count > 0) log.Write("warn", "backup_prune_failed", new { failed });
 
         const string srcWarning =
-            "src가 이제 워크북과 다를 수 있음 — 다음 push는 src를 전량 재주입해 이 복원을 덮어쓴다. " +
-            "비교: vbaloop diff / 복원된 워크북을 src로 채택: vbaloop pull --force";
+            "src may now differ from the workbook — the next push re-injects all of src and overwrites this restore. " +
+            "Compare: vbaloop diff / adopt the restored workbook into src: vbaloop pull --force";
         warnings.Add(srcWarning);
 
-        o.HumanLines.Add($"rollback 완료: {target.Id} ({target.Kind}, {Local(target.CreatedUtc)}) -> {cfg.WorkbookPath}");
+        o.HumanLines.Add($"rollback done: {target.Id} ({target.Kind}, {Local(target.CreatedUtc)}) -> {cfg.WorkbookPath}");
         if (safetyId != null)
-            o.HumanLines.Add($"  안전 백업: {safetyId} (되돌리기: vbaloop rollback --backup {safetyId})");
-        o.HumanLines.Add("  sync 캐시 무효화: 다음 push는 전량 재주입, plain pull은 차단(--force 필요)");
-        foreach (var w in warnings) o.HumanLines.Add($"  주의: {w}");
-        o.Hint = "vbaloop diff로 src와 비교 후 pull --force(복원 채택) 또는 push(src 재반영)";
+            o.HumanLines.Add($"  safety backup: {safetyId} (undo: vbaloop rollback --backup {safetyId})");
+        o.HumanLines.Add("  sync cache invalidated: next push re-injects everything, plain pull is blocked (--force required)");
+        foreach (var w in warnings) o.HumanLines.Add($"  warning: {w}");
+        o.Hint = "Compare with src via vbaloop diff, then pull --force (adopt the restore) or push (re-apply src)";
         o.Payload = new
         {
             restored = target.Id,
@@ -126,15 +126,15 @@ public static class RollbackCommand
     private static Outcome List(Outcome o, ProjectConfig cfg)
     {
         var entries = BackupStore.List(cfg.BackupsDir);
-        o.HumanLines.Add($"백업 {entries.Count(e => e.Complete)}개 ({cfg.BackupsDir}, 보존 {(cfg.BackupKeep > 0 ? cfg.BackupKeep + "개" : "비활성")})");
+        o.HumanLines.Add($"{entries.Count(e => e.Complete)} backups ({cfg.BackupsDir}, keep {(cfg.BackupKeep > 0 ? cfg.BackupKeep.ToString() : "disabled")})");
         foreach (var e in entries)
         {
             string size = e.Meta != null ? $"{e.Meta.SizeBytes / 1024.0:0.#} KB" : "-";
-            string extra = e.Meta?.RestoringFrom != null ? $" (복원 직전, -> {e.Meta.RestoringFrom})" : "";
-            o.HumanLines.Add($"  {e.Id}  {Local(e.CreatedUtc)}  {size}{(e.Complete ? "" : "  [미완 — 복원 불가]")}{extra}");
+            string extra = e.Meta?.RestoringFrom != null ? $" (taken just before a restore, -> {e.Meta.RestoringFrom})" : "";
+            o.HumanLines.Add($"  {e.Id}  {Local(e.CreatedUtc)}  {size}{(e.Complete ? "" : "  [incomplete — cannot restore]")}{extra}");
         }
         if (entries.Count == 0)
-            o.HumanLines.Add("  (없음 — push가 주입 직전에 만든다)");
+            o.HumanLines.Add("  (none — push creates one just before injection)");
         o.Payload = new
         {
             dir = cfg.BackupsDir,

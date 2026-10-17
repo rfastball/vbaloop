@@ -34,30 +34,30 @@ public static class RecoveryPolicy
         string sessionWorkbook)
     {
         if (identity == IdentityState.Gone)
-            return new(AutoAction.Clear, "기록된 Excel 프로세스가 이미 종료됨");
+            return new(AutoAction.Clear, "recorded Excel process already exited");
         if (external)
-            return new(AutoAction.Quarantine, "attach한 사용자 Excel은 자동 정리 대상이 아님");
+            return new(AutoAction.Quarantine, "an attached Excel belongs to the user and is never auto-cleaned");
         if (identity == IdentityState.Unknown)
-            return new(AutoAction.Quarantine, "프로세스 신원(시작 시각)을 확인할 수 없음");
+            return new(AutoAction.Quarantine, "process identity (start time) cannot be verified");
         if (probe == null)
-            return new(AutoAction.Quarantine, "프로브 결과 없음");
+            return new(AutoAction.Quarantine, "no probe result");
 
         switch (probe.Kind)
         {
             case ProbeKind.Windowless:
-                return new(AutoAction.Kill, "창 없는 Excel(워크북 창 0개)");
+                return new(AutoAction.Kill, "windowless Excel (0 workbook windows)");
             case ProbeKind.Responsive:
                 var foreign = ForeignWorkbooks(probe.Workbooks, sessionWorkbook);
                 return foreign.Count == 0
                     ? new(AutoAction.Kill, probe.Workbooks.Count == 0
-                        ? "열린 워크북 없음"
-                        : "세션 워크북만 열려 있음")
-                    : new(AutoAction.Quarantine, $"세션 외 워크북이 열려 있음: {string.Join(", ", foreign)}");
+                        ? "no open workbooks"
+                        : "only the session workbook is open")
+                    : new(AutoAction.Quarantine, $"non-session workbooks open: {string.Join(", ", foreign)}");
             case ProbeKind.Busy:
-                return new(AutoAction.Quarantine, "Excel이 busy(셀 편집/모달 대화상자 의심) — 워크북 목록 확인 불가"
+                return new(AutoAction.Quarantine, "Excel is busy (suspected cell edit mode/modal dialog) — cannot list workbooks"
                                                   + Suffix(probe.Detail));
             default:
-                return new(AutoAction.Quarantine, "Excel이 응답하지 않음 — 워크북 목록 확인 불가" + Suffix(probe.Detail));
+                return new(AutoAction.Quarantine, "Excel is not responding — cannot list workbooks" + Suffix(probe.Detail));
         }
     }
 
@@ -66,15 +66,15 @@ public static class RecoveryPolicy
     {
         if (corrupt)
             return force
-                ? new(ClearAction.ForceClear, "손상된 마커를 --force로 해제")
-                : new(ClearAction.Refuse, "마커가 손상돼 기록된 프로세스를 확인할 수 없음");
+                ? new(ClearAction.ForceClear, "corrupt marker cleared with --force")
+                : new(ClearAction.Refuse, "marker is corrupt; cannot verify the recorded process");
         if (identity == IdentityState.Gone)
-            return new(ClearAction.Clear, "기록된 Excel 프로세스 종료 확인");
+            return new(ClearAction.Clear, "recorded Excel process confirmed exited");
         return force
-            ? new(ClearAction.ForceClear, "기록된 Excel 프로세스가 아직 살아있으나 --force로 해제")
+            ? new(ClearAction.ForceClear, "recorded Excel process still alive, cleared with --force")
             : new(ClearAction.Refuse, identity == IdentityState.Match
-                ? "기록된 Excel 프로세스가 아직 살아있음"
-                : "기록된 PID가 살아있고 신원을 확인할 수 없음");
+                ? "recorded Excel process still alive"
+                : "recorded PID is alive and its identity cannot be verified");
     }
 
     /// <summary>
@@ -86,18 +86,18 @@ public static class RecoveryPolicy
         string sessionWorkbook)
     {
         if (external)
-            return new(DiscardAction.Detach, "attach 세션 — 분리만 하고 사용자 Excel은 그대로 둠");
+            return new(DiscardAction.Detach, "attached session — detach only, the user's Excel is left as is");
         if (identity == IdentityState.Gone)
-            return new(DiscardAction.CleanOnly, "기록된 Excel 프로세스가 이미 종료됨");
+            return new(DiscardAction.CleanOnly, "recorded Excel process already exited");
         if (identity == IdentityState.Unknown)
-            return new(DiscardAction.Refuse, "프로세스 신원(시작 시각)을 확인할 수 없어 종료하지 않음");
+            return new(DiscardAction.Refuse, "process identity (start time) cannot be verified; not killing");
         if (probe is { Kind: ProbeKind.Responsive })
         {
             var foreign = ForeignWorkbooks(probe.Workbooks, sessionWorkbook);
             if (foreign.Count > 0)
-                return new(DiscardAction.Refuse, $"세션 외 워크북이 열려 있어 종료하지 않음: {string.Join(", ", foreign)}");
+                return new(DiscardAction.Refuse, $"non-session workbooks open; not killing: {string.Join(", ", foreign)}");
         }
-        return new(DiscardAction.Kill, "도구 기동 세션, 신원 일치");
+        return new(DiscardAction.Kill, "tool-launched session, identity matches");
     }
 
     public static List<string> ForeignWorkbooks(IEnumerable<string> workbooks, string sessionWorkbook)

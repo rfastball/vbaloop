@@ -23,10 +23,10 @@ internal static class RunnerSupervisor
 
         /// <summary>세션 관련 후속 안내 — 격리됐으면 해제 안내, 아니면 session start(일회용이면 재실행).</summary>
         public string SessionHint => Marker != null ? RecoveryGate.HintFor(Marker)
-            : Ephemeral ? "같은 명령 재실행(일회용 Excel은 명령마다 새로 뜬다)" : "session start";
+            : Ephemeral ? "rerun the same command (ephemeral Excel starts fresh for each command)" : "session start";
 
         /// <summary>세션 사망 뒤 할 일을 사람용 문장 꼬리로.</summary>
-        public string RestartNote => Ephemeral ? "재실행하면 새 일회용 Excel로 진행" : "session start 필요";
+        public string RestartNote => Ephemeral ? "rerunning proceeds with a new ephemeral Excel" : "session start required";
 
         /// <summary>타임아웃/poison 메시지 꼬리 — kill 여부를 명시.</summary>
         public string RecoveryTail => Recovery is { } r ? RecoveryGate.Explain(r, Marker, RecoveryWhy ?? "") : "";
@@ -44,7 +44,7 @@ internal static class RunnerSupervisor
         IEnumerable<string> extraRunnerArgs)
     {
         string exe = Environment.ProcessPath
-            ?? throw new CliError("자기 exe 경로를 확인할 수 없음");
+            ?? throw new CliError("cannot determine own exe path");
         string toml = cfg.TomlPath; // --config로 받은 경로일 수 있다 — 조립하면 자식이 설정을 못 찾는다
 
         var psi = new ProcessStartInfo
@@ -68,7 +68,7 @@ internal static class RunnerSupervisor
 
         log.Write("info", "runner_started", new { command = commandName, runId, timeoutSec });
         using var proc = Process.Start(psi)
-            ?? throw new CliError("자식 러너 프로세스 시작 실패");
+            ?? throw new CliError("failed to start child runner process");
         var stdoutTask = proc.StandardOutput.ReadToEndAsync();
         var stderrTask = proc.StandardError.ReadToEndAsync();
 
@@ -77,7 +77,7 @@ internal static class RunnerSupervisor
             // 워치독이 못 알아보는 모달(MsgBox 등)/행의 최종 폴백. 러너(우리 프로세스)만 kill —
             // Excel은 사용자 작업이 없다고 증명될 때만 정리하고 아니면 격리(설계 §11, 자동 kill 폐지).
             try { proc.Kill(entireProcessTree: true); } catch { /* 이미 종료 */ }
-            string reason = $"{commandName} 타임아웃({timeoutSec}s) — 워치독 관할 밖 모달/행 가능성";
+            string reason = $"{commandName} timeout ({timeoutSec}s) — possible modal/hang outside watchdog scope";
             meta.MarkPoisoned(reason, null);
             log.Write("error", "runner_timeout", new { command = commandName, runId, timeoutSec });
             var (res, marker, why) = RecoveryGate.Resolve(cfg, meta, "timeout", reason, commandName, log);
@@ -135,10 +135,10 @@ internal static class RunnerSupervisor
             // 잠금을 쥐면 다음 세션이 read-only로 열리는 버그의 트리거.
             // 창 없는 좀비는 격리 규칙의 Windowless로 정리되고, 다른 워크북이 보이면 격리(설계 §11).
             (dres, dmarker, dwhy) = RecoveryGate.Resolve(cfg, meta, "session_died",
-                "컴파일 오류 모달 해제(VBE 닫기) 후 세션 워크북 소실", commandName, log);
+                "session workbook lost after compile error modal dismissal (VBE closed)", commandName, log);
             SessionMeta.Delete(meta.FilePath);
             log.Write("warn", "session_died_after_modal",
-                new { note = "컴파일 오류 모달 해제(VBE 닫기)가 Excel 종료를 유발 — session start 필요", recovery = dres.ToString() });
+                new { note = "dismissing the compile error modal (closing VBE) caused Excel to exit — session start required", recovery = dres.ToString() });
         }
 
         return new Result(false, proc.ExitCode, root, error, hint, stderr, sessionDied,
@@ -149,7 +149,7 @@ internal static class RunnerSupervisor
     {
         int brace = stdout.IndexOf('{');
         if (brace < 0)
-            return (null, "자식 러너가 JSON을 출력하지 않음", null);
+            return (null, "child runner produced no JSON output", null);
         try
         {
             var doc = JsonDocument.Parse(stdout[brace..]);
@@ -162,7 +162,7 @@ internal static class RunnerSupervisor
         }
         catch (JsonException ex)
         {
-            return (null, $"자식 러너 출력 파싱 실패: {ex.Message}", null);
+            return (null, $"failed to parse child runner output: {ex.Message}", null);
         }
     }
 

@@ -17,11 +17,11 @@ public static class ExcelLauncher
             Process.GetProcessesByName("EXCEL").Select(p => p.Id));
 
         var progType = Type.GetTypeFromProgID("Excel.Application")
-            ?? throw new CliError("Excel.Application ProgID를 찾지 못함 — Excel 미설치?",
-                "vbaloop doctor로 환경 점검", environment: true);
+            ?? throw new CliError("Excel.Application ProgID not found — Excel not installed?",
+                "Check the environment with vbaloop doctor", environment: true);
 
         dynamic app = Activator.CreateInstance(progType)
-            ?? throw new CliError("Excel COM 인스턴스 생성 실패", environment: true);
+            ?? throw new CliError("Failed to create Excel COM instance", environment: true);
 
         try
         {
@@ -34,12 +34,12 @@ public static class ExcelLauncher
             // 필수 단계: 자신이 만든 프로세스인지 검증 (기존 인스턴스에 붙었다면 실패)
             if (before.Contains(pid))
                 throw new CliError(
-                    $"새로 생성한 세션이 기존 Excel 프로세스(PID {pid})에 연결됨 — 도구 소유 세션 불가",
-                    "기존 Excel 인스턴스와의 충돌 — 사람 Excel을 닫거나 DCOM 설정 확인",
+                    $"Newly created session attached to an existing Excel process (PID {pid}) — cannot be a tool-owned session",
+                    "Conflict with an existing Excel instance — have the user close their Excel or check DCOM settings",
                     environment: true);
 
             string startTime = ProcessIdentity.GetStartTimeIso(pid)
-                ?? throw new CliError($"PID {pid}의 StartTime을 읽지 못함", environment: true);
+                ?? throw new CliError($"Could not read StartTime of PID {pid}", environment: true);
 
             // doctor --kill-orphans가 "도구가 띄운 PID"를 우선 식별하도록 기록(설계 §11, best-effort)
             ExcelPidRegistry.TryRecord(ExcelPidRegistry.DefaultPath, pid, startTime, ExcelPidRegistry.KindLaunched, null);

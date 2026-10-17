@@ -76,8 +76,8 @@ public sealed class RecoveryMarker
     /// <summary>에러/상태 출력용 한 줄 요약.</summary>
     public string Describe()
         => Corrupt
-            ? "격리 마커 손상(내용 판독 불가)"
-            : $"Excel PID {Pid}" + (IsExternal ? "(사용자 Excel, attach)" : "(도구 기동)")
-              + $" 격리 중 — 사유 {Reason}" + (Command != null ? $", 명령 {Command}" : "")
+            ? "quarantine marker corrupt (contents unreadable)"
+            : $"Excel PID {Pid}" + (IsExternal ? "(user's Excel, attached)" : "(tool-launched)")
+              + $" quarantined — reason {Reason}" + (Command != null ? $", command {Command}" : "")
               + (Detail != null ? $": {Detail}" : "");
 }

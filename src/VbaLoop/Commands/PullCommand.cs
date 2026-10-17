@@ -59,9 +59,9 @@ public static class PullCommand
         if (blockReason != null)
         {
             if (!opts.Force)
-                throw new CliError($"pull 차단: {blockReason}",
-                    "vbaloop push로 먼저 반영, 의도된 덮어쓰기면 vbaloop pull --force");
-            o.HumanLines.Add("경고: 동기화되지 않은 src 편집을 --force로 덮어씀");
+                throw new CliError($"pull blocked: {blockReason}",
+                    "apply with vbaloop push first; if the overwrite is intended, use vbaloop pull --force");
+            o.HumanLines.Add("warning: overwriting unsynced src edits with --force");
             log.Write("warn", "pull_forced", new { reason = blockReason });
         }
 
@@ -80,7 +80,7 @@ public static class PullCommand
                 {
                     Name = ci.Name,
                     Action = "skipped",
-                    Reason = "벤더링 관리 모듈 — 정본은 init(pull 회수 대상 아님, 갱신은 vbaloop init)",
+                    Reason = "vendored managed module — canonical copy is owned by init (not pulled back; update with vbaloop init)",
                 });
                 continue;
             }
@@ -102,7 +102,7 @@ public static class PullCommand
                         {
                             Name = ci.Name,
                             Action = "skipped",
-                            Reason = $"미지원 컴포넌트 타입 {ci.Type}",
+                            Reason = $"component type not supported: {ci.Type}",
                         });
                         break;
                 }
@@ -129,9 +129,9 @@ public static class PullCommand
         var summaryCounts = modules.GroupBy(m => m.Action)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        o.HumanLines.Add($"pull 완료: {string.Join(", ", summaryCounts.Select(kv => $"{kv.Key} {kv.Value}"))}");
+        o.HumanLines.Add($"pull done: {string.Join(", ", summaryCounts.Select(kv => $"{kv.Key} {kv.Value}"))}");
         foreach (var orphan in orphans)
-            o.HumanLines.Add($"경고: 워크북에 없는 src 파일(orphan): {orphan} — 삭제하지 않음");
+            o.HumanLines.Add($"warning: src file not in workbook (orphan): {orphan} — not deleted");
 
         // 사후 지문 기록: pull이 만든 디스크 상태가 새 동기화 기준선 — 부분 실패여도
         // 기록한다(사후 상태는 도구 산출물이지 사용자 편집이 아니므로 재pull이 막히면 안 됨).
@@ -147,7 +147,7 @@ public static class PullCommand
             orphans,
         };
         if (failed > 0)
-            o.Fail($"pull 부분 실패: 모듈 {failed}개 실패 — payload.modules에서 상세 확인");
+            o.Fail($"pull partial failure: {failed} modules failed — see payload.modules for details");
         return o;
     }
 
@@ -193,7 +193,7 @@ public static class PullCommand
         };
         if (kind == VbaComponentKind.ClassModule)
             o.HumanLines.Add(
-                $"안내: {ci.Name}은 표준 클래스 헤더로 합성됨 — VB_PredeclaredId 등 비표준 속성이 필요하면 최초 1회 수동 Export로 헤더를 시드할 것");
+                $"note: {ci.Name} header was synthesized as a standard class header — if non-standard attributes such as VB_PredeclaredId are needed, seed the header once with a manual Export");
         return VbaHeader.SynthesizeHeader(kind, ci.Name);
     }
 
@@ -253,7 +253,7 @@ public static class PullCommand
             bool frxCacheMatches = formSync?.FrxHash != null && formSync.FrxHash == srcFrxHash;
 
             if (frmTextSame && frxCacheMatches)
-                return new ModuleResult { Name = ci.Name, Action = "skipped", Reason = "변경 없음(frx 노이즈 생략)" };
+                return new ModuleResult { Name = ci.Name, Action = "skipped", Reason = "no changes (frx noise skipped)" };
 
             // 변경(또는 최초 시딩): frm/frx 기록 후 캐시를 방금 쓴 src 파일 기준으로 갱신
             if (!frmTextSame) File.WriteAllBytes(frmPath, newFrmBytes);
@@ -269,7 +269,7 @@ public static class PullCommand
             {
                 Name = ci.Name,
                 Action = frmExisted ? "replaced" : "added",
-                Reason = frmTextSame ? "frx만 갱신(캐시 시딩)" : null,
+                Reason = frmTextSame ? "frx only updated (cache seeding)" : null,
             };
         }
         finally
@@ -287,7 +287,7 @@ public static class PullCommand
         {
             byte[] oldBytes = File.ReadAllBytes(path);
             if (oldBytes.AsSpan().SequenceEqual(newBytes))
-                return new ModuleResult { Name = name, Action = "skipped", Reason = "변경 없음" };
+                return new ModuleResult { Name = name, Action = "skipped", Reason = "no changes" };
         }
         File.WriteAllBytes(path, newBytes);
         return new ModuleResult

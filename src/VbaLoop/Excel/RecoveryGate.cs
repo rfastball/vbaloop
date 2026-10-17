@@ -32,7 +32,7 @@ public static class RecoveryGate
     }
 
     public static CliError Quarantined(RecoveryMarker m)
-        => new($"세션 격리 중 — {m.Describe()}", HintFor(m), environment: true);
+        => new($"Session quarantined — {m.Describe()}", HintFor(m), environment: true);
 
     /// <summary>
     /// 격리 해제 안내. --discard는 미저장 변경을 버리는 파괴적 동작이라 "사용자 확인 후"를 명시한다 —
@@ -41,12 +41,12 @@ public static class RecoveryGate
     public static string HintFor(RecoveryMarker m)
     {
         if (m.Corrupt)
-            return "_dbg/recovery.json을 확인한 뒤 vbaloop recovery clear --force";
+            return "Quarantine marker is corrupt; inform the user. Run `vbaloop recovery clear --force` only if the user says so after inspecting _dbg/recovery.json";
         if (m.IsExternal)
-            return $"사용자 Excel(PID {m.Pid})의 대화상자/실행 중 매크로를 사용자가 정리한 뒤 "
-                   + "vbaloop session stop --discard(분리만, Excel은 그대로) — 상태 확인은 vbaloop recovery status";
-        return $"사용자에게 Excel(PID {m.Pid})에 저장할 작업이 없는지 확인 → 사용자가 직접 닫으면 vbaloop recovery clear, "
-               + "버려도 된다고 하면 vbaloop session stop --discard(미저장 변경 유실) — 상태 확인은 vbaloop recovery status";
+            return $"Do NOT kill Excel (PID {m.Pid}) yourself; inform the user. Once the user has dealt with the dialog/running macro in their Excel, run "
+                   + "`vbaloop session stop --discard` (detach only, Excel stays running) — check state with `vbaloop recovery status`";
+        return $"Do NOT kill Excel (PID {m.Pid}) yourself; inform the user and ask whether it holds unsaved work. After the user closes that Excel, run `vbaloop recovery clear`; "
+               + "if the user says it may be discarded, run `vbaloop session stop --discard` (unsaved changes are lost) — check state with `vbaloop recovery status`";
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public static class RecoveryGate
             case AutoAction.Kill:
                 if (KillVerified(meta.Pid, meta.ExcelStartTime, log))
                     return (Resolution.Killed, null, why);
-                why = $"{why}, 그러나 kill 후에도 프로세스가 남아 있음";
+                why = $"{why}, but the process remained after kill";
                 break;
         }
 
@@ -92,9 +92,9 @@ public static class RecoveryGate
     /// <summary>Resolve 결과를 실패 메시지 꼬리로 — 에이전트가 kill 여부를 오해하지 않도록 명시.</summary>
     public static string Explain(Resolution r, RecoveryMarker? marker, string why) => r switch
     {
-        Resolution.ProcessGone => "Excel 프로세스도 종료됨 — 다음 명령이 세션을 자동 재기동",
-        Resolution.Killed => $"세션 Excel을 정리함({why}) — 다음 명령이 세션을 자동 재기동",
-        _ => $"Excel(PID {marker?.Pid})은 kill하지 않고 격리함({why})",
+        Resolution.ProcessGone => "Excel process has also exited — the next command restarts the session automatically",
+        Resolution.Killed => $"Session Excel cleaned up ({why}) — the next command restarts the session automatically",
+        _ => $"Excel (PID {marker?.Pid}) quarantined, not killed ({why})",
     };
 
     public static string HintAfter(Resolution r, RecoveryMarker? marker)

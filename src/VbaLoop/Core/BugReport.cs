@@ -64,26 +64,26 @@ public static class BugReport
         {
             $"# [BUG] {title}",
             "",
-            $"- 보고일: {date:yyyy-MM-dd}",
-            $"- 보고자: {reporterProject} 세션 (Claude Code) — (작업 맥락 한 줄로 교체)",
-            "- 심각도: **TODO(Low/Medium/High)** — (판단 근거 한 줄)",
-            $"- 실행 exe 빌드: {exeBuildInfo}",
+            $"- Reported: {date:yyyy-MM-dd}",
+            $"- Reporter: {reporterProject} session (Claude Code) — (replace with one line of work context)",
+            "- Severity: **TODO(Low/Medium/High)** — (one-line rationale)",
+            $"- Running exe build: {exeBuildInfo}",
             "",
-            "## 요약",
+            "## Summary",
             "",
-            "(무엇이 어떻게 잘못되는지 2-4문장. 관련 기존 리포트가 있으면 파일명 인용)",
+            "(What goes wrong and how, in 2-4 sentences. Cite the filename of any related existing report)",
             "",
-            "## 증거",
+            "## Evidence",
             "",
-            "(실행한 명령과 --json 출력, git diff 등을 코드블록으로)",
+            "(Commands run, --json output, git diff, etc. as code blocks)",
             "",
-            "## 제안 수정",
+            "## Proposed fix",
             "",
-            "(선택 — 코드 포인터가 있으면 파일:라인으로)",
+            "(Optional — code pointers as file:line)",
             "",
-            "## 재현 절차",
+            "## Repro steps",
             "",
-            "1. (없으면 이 섹션 삭제)",
+            "1. (delete this section if none)",
         };
         return CanonicalText.ToCanonical(lines);
     }
@@ -100,7 +100,7 @@ public static class BugReport
             var lines = CanonicalText.SplitLines(CanonicalText.ReadFileStripBom(path));
             var title = lines.FirstOrDefault(l => l.StartsWith("# ", StringComparison.Ordinal))?[2..].Trim()
                         ?? Path.GetFileNameWithoutExtension(path);
-            var resolved = lines.Any(l => l.StartsWith("## 해소", StringComparison.Ordinal));
+            var resolved = lines.Any(l => l.StartsWith("## Resolved", StringComparison.Ordinal) || l.StartsWith("## 해소", StringComparison.Ordinal));
             result.Add((Path.GetFileName(path), title, resolved));
         }
         return result;

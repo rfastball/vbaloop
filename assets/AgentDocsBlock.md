@@ -1,43 +1,45 @@
-## 개발 루프 (vbaloop)
+## Development loop (vbaloop)
 
-빌드/테스트 루프는 `vbaloop`(단일 exe)로 수행한다. PATH 미등록 시 설치 경로:
-`%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe` (그마저 없으면 `vbaloop setup`으로 재설치).
-온보딩/드리프트 복구: `vbaloop init` (검사만: `vbaloop init --check`).
-단, init --check가 exit 3 + `exe-older`(vbaloop.toml managed_by > 실행 exe)면 init으로 고치지 말고
-사용자에게 `vbaloop update`를 요청한다 (managed_by 줄 수정/삭제 금지).
-프로젝트 고유 내용은 이 관리 블록 밖에 작성한다 (init이 블록 내부를 덮어씀).
+The build/test loop runs through `vbaloop` (a single exe). If it is not on PATH, the install path is
+`%LOCALAPPDATA%\vbaloop\bin\vbaloop.exe` (if even that is missing, reinstall with `vbaloop setup`).
+Onboarding/drift repair: `vbaloop init` (check only: `vbaloop init --check`).
+If init --check exits 3 with `exe-older` (the managed_by version in vbaloop.toml is newer than the running exe), do not fix it
+with init; ask the user to run `vbaloop update` (do not edit or delete the managed_by line).
+Write project-specific content outside this managed block (init overwrites the inside of the block).
 
-1. 편집: src\*.bas/.cls/.frm 수정
-2. 세션: 기본은 일회용 - push/pull/test/run/diff가 명령마다 숨은 Excel을 띄우고 닫는다(vbaloop.toml
-   [excel] session). session start/attach로 연 세션이 살아 있으면 그것을 쓴다
-3. 주입: vbaloop push (src -> 워크북 in-place 주입 -> VBE 컴파일 통과 시에만 저장, --prune/--force 지원.
-   주입 직전 _dbg\backups\에 백업)
-4. 실행: vbaloop test (Test_* 전체 실행 + LogShim jsonl 판독, --timeout <초>)
-5. 수정: fail이면 원인 고치고 1로, green이면 완료(버전관리를 쓰면 이때 커밋)
+1. Edit: change src\*.bas/.cls/.frm
+2. Session: ephemeral by default - push/pull/test/run/diff start a hidden Excel per command and close it (vbaloop.toml
+   [excel] session). If a session opened with session start/attach is alive, it is used
+3. Inject: vbaloop push (src -> in-place injection into the workbook -> saved only if the VBE compile passes; supports --prune/--force.
+   Backup to _dbg\backups\ right before injecting)
+4. Run: vbaloop test (runs every Test_* + reads the LogShim jsonl, --timeout <seconds>)
+5. Fix: on fail, fix the cause and go back to 1; when green you are done (commit now if you use version control)
 
-- 모든 명령 --json 지원: {command, ok, exitCode, hint, errors[], payload}
-- exit code: 성공 0 / 환경 오류 3 (세션/Excel/COM/busy/격리 - hint를 따른다) / 그 외 2
-- 격리(hint에 recovery clear / --discard): 도구가 Excel을 안전하게 정리할 수 없어 kill 대신 멈춘 상태.
-  스스로 Excel을 죽이지 말 것(--discard, doctor --kill-orphans 포함) - 사용자에게 알리고, 사용자가
-  그 Excel을 닫으면 vbaloop recovery clear, 버려도 된다고 하면 vbaloop session stop --discard
-- busy(exit 3): Excel이 셀 편집/대화상자 중 - 잠시 후 같은 명령 재시도
-- 사용자가 정본을 이미 Excel에서 열어둔 경우(read-only 거부 hint): 사용자 확인 후
-  vbaloop session attach - 그 Excel에서 push/test가 동작하고 session stop은 분리만 한다
-- 테스트는 Public Sub Test_*() (인자 없음), 단언은 LogShim.AssertEq (Debug.Assert 금지)
-- src\LogShim.bas는 벤더링 사본 - 직접 수정 금지, 갱신은 vbaloop init
-- push 실패 시 hint가 워크북 상태를 말한다(변경 없음 / 전부 원복 / 폐기 / 세션 poison - 저장 안 함).
-  디스크 정본은 항상 push 이전 상태. 컴파일 오류(payload.compile.result = compile_error)면 고치고 재push -
-  이번 변경과 무관한 기존 오류일 때만 사용자 확인 후 push --skip-compile.
-  워크북 파일 자체를 되돌리려면 vbaloop rollback --latest (목록: rollback --list,
-  유지 세션이 살아 있으면 exit 3 - session stop 먼저)
-- 일회용 모드의 test/run은 정본을 읽기 전용으로 연다 - 테스트가 바꾼 시트는 저장되지 않는다
-- 배포 아티팩트: vbaloop dist --out <경로> (클린 사본 빌드 - 필터/스탬프/무해화/VBE 컴파일 검증/선택 부트스트랩).
-  push 선행 필수(마지막 push == src 미동기 시 거부). 절차/실패 플레이북은 SKILL.md
-- pull은 동기화 안 된 src 편집이 있으면 차단된다 - 기본은 push로 먼저 반영,
-  워크북 쪽이 진실일 때만 pull --force로 덮어쓰기
-- 세션 Excel에 직접 COM 접근 금지(GetActiveObject, New-Object -ComObject 등 - 조회/진단 포함).
-  워크북 실제 내용 확인은 vbaloop diff --json (읽기 전용, --module <이름>은 단일 모듈 덤프)
-- src 규약: UTF-8 BOM 없음 + CRLF + 끝 개행 1개. CP949 밖 문자(em dash U+2014, 이모지)는 push가 거부
-- vbaloop 자체 결함 발견 시: vbaloop bugreport "<제목>" 으로 표준 리포트 생성 후 내용 채움
-  (절차: .claude\skills\vbaloop\SKILL.md)
-- 심화 절차/실패 플레이북: .claude\skills\vbaloop\SKILL.md (vbaloop init이 관리 - 직접 수정 금지)
+- Every command supports --json: {command, ok, exitCode, hint, errors[], payload}
+- exit code: success 0 / environment error 3 (session/Excel/COM/busy/quarantined - follow the hint) / otherwise 2
+- Quarantined (hint mentions recovery clear / --discard): the tool could not safely clean up Excel, so it stopped instead of killing it.
+  Never kill Excel on your own initiative - that includes running --discard or doctor --kill-orphans before the user says so.
+  Tell the user; if the user closes that Excel, vbaloop recovery clear; if they say it may be discarded, vbaloop session stop --discard
+- busy (exit 3): Excel is in cell edit mode or showing a dialog - retry the same command shortly
+- If the user already has the canonical workbook open in Excel (read-only refusal hint): after the user confirms,
+  vbaloop session attach - push/test then work in that Excel and session stop only detaches
+- Tests are Public Sub Test_*() (no arguments); assert with LogShim.AssertEq (no Debug.Assert)
+- src\LogShim.bas is a vendored copy - do not edit directly; update with vbaloop init
+- When push fails, the hint states the workbook state (untouched / fully restored / discarded / session poisoned - not saved).
+  After a failed push the canonical workbook on disk is always in its pre-push state.
+  On a compile error (payload.compile.result = compile_error), fix it and push again.
+  Exception: if the error is pre-existing and unrelated to this change, ask the user; only after they confirm, push --skip-compile.
+  If you fixed something but the same error repeats and push keeps returning cached:true, push --force bypasses the fingerprint cache.
+  To revert the workbook file itself, vbaloop rollback --latest (list: rollback --list;
+  exit 3 while a persistent session is alive - session stop first)
+- In ephemeral mode test/run open the canonical workbook read-only - sheets changed by tests are not saved
+- Distribution artifact: vbaloop dist --out <path> (clean copy build - filter/stamp/sanitize/VBE compile check/optional bootstrap).
+  push must come first (refused when last push != src). Procedure/failure playbook: SKILL.md
+- pull is blocked when there are unsynced src edits - by default apply them with push first;
+  only when the workbook is the truth, overwrite with pull --force
+- No direct COM access to the session Excel (GetActiveObject, New-Object -ComObject etc. - including reads/diagnostics).
+  To see what is really in the workbook, vbaloop diff --json (read-only; --module <name> dumps a single module)
+- src conventions: UTF-8 without BOM + CRLF + exactly one trailing newline. Characters outside CP949 (em dash U+2014, emoji) are refused by push
+- If you find a defect in vbaloop itself: create a standard report with vbaloop bugreport "<title>" and fill it in
+  (procedure: .claude\skills\vbaloop\SKILL.md)
+- Detailed procedures/failure playbooks: .claude\skills\vbaloop\SKILL.md (managed by vbaloop init - do not edit directly)

@@ -63,9 +63,9 @@ public static class InitCommand
                 }).ToArray(),
             };
             if (bad > 0)
-                o.Fail($"온보딩 아티팩트 {bad}건 비정상", "vbaloop init");
+                o.Fail($"{bad} onboarding artifacts abnormal", "vbaloop init");
             else
-                o.HumanLines.Add("온보딩 상태 정상");
+                o.HumanLines.Add("onboarding state OK");
             return o;
         }
 
@@ -77,10 +77,10 @@ public static class InitCommand
                 + (action != ArtifactAction.Unchanged && item.Detail != null ? $" ({item.Detail})" : ""));
         var shim = results.FirstOrDefault(r => r.Item.Path.EndsWith("LogShim.bas", StringComparison.OrdinalIgnoreCase));
         if (shim.Item != null && shim.Action != ArtifactAction.Unchanged)
-            o.HumanLines.Add("LogShim.bas 갱신됨 - 다음 push에서 워크북에 반영 필요");
+            o.HumanLines.Add("LogShim.bas updated - next push must apply it to the workbook");
         var skill = results.FirstOrDefault(r => r.Item.Path.EndsWith("SKILL.md", StringComparison.OrdinalIgnoreCase));
         if (skill.Item != null && skill.Action != ArtifactAction.Unchanged)
-            o.HumanLines.Add("SKILL.md 갱신됨 - 관리 사본(직접 수정 금지, 갱신은 vbaloop init)");
+            o.HumanLines.Add("SKILL.md updated - managed copy (do not edit directly; update via vbaloop init)");
         o.Payload = new
         {
             mode = "apply",
@@ -130,14 +130,14 @@ public static class InitCommand
             (registryRoots, gone) = ProjectRegistry.PruneFile(registryPath);
         }
         foreach (var g in gone)
-            o.HumanLines.Add($"[GONE]    {g} (폴더 또는 vbaloop.toml 없음 - 목록에서 {(opts.Check ? "제거 예정" : "제거")})");
+            o.HumanLines.Add($"[GONE]    {g} (folder or vbaloop.toml missing - {(opts.Check ? "will be removed" : "removed")} from the list)");
 
         var projects = ProjectRegistry.Union(siblings, registryRoots);
         if (projects.Count == 0)
         {
             o.Payload = new { mode = opts.Check ? "all-check" : "all", projectsRoot, registry = registryPath, gone, projects = Array.Empty<object>() };
-            o.Fail("init --all 대상 프로젝트가 없음",
-                "프로젝트 폴더에서 vbaloop init(또는 아무 프로젝트 명령)을 한 번 실행하면 목록에 등록됨");
+            o.Fail("No projects for init --all",
+                "Run vbaloop init (or any project command) once in a project folder to register it in the list");
             return o;
         }
 
@@ -161,10 +161,10 @@ public static class InitCommand
                 refused++;
                 o.HumanLines.Add(stampState == StampState.ExeOlder
                     ? $"[REFUSED] {name}: managed_by {stamp} > exe {ExeVersion.Text}"
-                    : $"[REFUSED] {name}: managed_by 값이 semver가 아님 ({stamp})");
+                    : $"[REFUSED] {name}: managed_by value is not semver ({stamp})");
                 rows.Add(new { name, root, ok = false, state = ManagedStamp.Label(stampState), managedBy = stamp,
                     error = (string?)(stampState == StampState.ExeOlder
-                        ? "관리 스탬프가 exe보다 새로움 - 쓰지 않음" : "관리 스탬프가 semver가 아님 - 쓰지 않음") });
+                        ? "managed stamp is newer than the exe - not written" : "managed stamp is not semver - not written") });
                 continue;
             }
             try
@@ -203,7 +203,7 @@ public static class InitCommand
             }
         }
         if (needsPush.Count > 0)
-            o.HumanLines.Add($"LogShim.bas 갱신 {needsPush.Count}건 - 각 프로젝트에서 vbaloop push 필요: {string.Join(", ", needsPush)}");
+            o.HumanLines.Add($"LogShim.bas updated in {needsPush.Count} projects - run vbaloop push in each: {string.Join(", ", needsPush)}");
 
         o.Payload = new
         {
@@ -216,16 +216,16 @@ public static class InitCommand
             needsPush,
         };
         if (failed > 0)
-            o.Fail($"프로젝트 {failed}건 수렴 실패", "위 [FAIL] 라인의 원인 해결 후 재실행");
+            o.Fail($"{failed} projects failed to converge", "Fix the cause of the [FAIL] lines above, then rerun");
         if (refused > 0)
-            o.Fail($"프로젝트 {refused}건 거부 - [REFUSED] 라인의 프로젝트는 실행 exe({ExeVersion.Text})보다 새 vbaloop가 관리 중",
+            o.Fail($"{refused} projects refused - projects on [REFUSED] lines are managed by a newer vbaloop than the running exe ({ExeVersion.Text})",
                 failed > 0 ? o.Hint : ManagedStamp.UpdateHint, environment: true);
         if (failed > 0 || refused > 0)
             return o;
         if (opts.Check && drifted > 0)
-            o.Fail($"프로젝트 {drifted}건 드리프트", "vbaloop init --all");
+            o.Fail($"{drifted} projects drifted", "vbaloop init --all");
         else
-            o.HumanLines.Add($"전 프로젝트 {(opts.Check ? "온보딩 상태 정상" : "수렴 완료")} ({projects.Count}개)");
+            o.HumanLines.Add($"All projects {(opts.Check ? "onboarding state OK" : "converged")} ({projects.Count})");
         return o;
     }
 
@@ -238,10 +238,10 @@ public static class InitCommand
     {
         bool older = state == StampState.ExeOlder;
         o.HumanLines.Add(older
-            ? $"[EXE-OLDER] vbaloop.toml managed_by {stamp} > 실행 exe {ExeVersion.Text}"
-            : $"[INVALID] vbaloop.toml managed_by = \"{stamp}\" (semver 아님)");
+            ? $"[EXE-OLDER] vbaloop.toml managed_by {stamp} > running exe {ExeVersion.Text}"
+            : $"[INVALID] vbaloop.toml managed_by = \"{stamp}\" (not semver)");
         if (older)
-            o.HumanLines.Add("관리 파일을 쓰지 않았음 - vbaloop를 갱신해야 함 (init으로 고치지 말 것)");
+            o.HumanLines.Add("Managed files not written - vbaloop must be updated (ask the user to run vbaloop update; do not fix with init)");
         o.Payload = new
         {
             mode,
@@ -254,8 +254,8 @@ public static class InitCommand
         if (older)
             o.Fail(ManagedStamp.DescribeExeOlder(stamp, ExeVersion.Text), ManagedStamp.UpdateHint, environment: true);
         else
-            o.Fail($"vbaloop.toml [vbaloop] managed_by 값이 semver가 아님: {stamp}",
-                "vbaloop.toml의 managed_by 줄을 확인(지우면 다음 init이 다시 기록)");
+            o.Fail($"vbaloop.toml [vbaloop] managed_by value is not semver: {stamp}",
+                "Check the managed_by line in vbaloop.toml (if removed, the next init rewrites it)");
         return o;
     }
 
@@ -276,7 +276,7 @@ public static class InitCommand
     private static string[] LoadAssetLines(string logicalName)
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(logicalName)
-            ?? throw new CliError($"임베디드 자산 누락: {logicalName}", "vbaloop 재빌드 필요 (csproj EmbeddedResource)");
+            ?? throw new CliError($"Embedded asset missing: {logicalName}", "Rebuild vbaloop (csproj EmbeddedResource)");
         using var reader = new StreamReader(stream);
         var text = reader.ReadToEnd();
         if (text.Length > 0 && text[0] == '\uFEFF') text = text[1..];
