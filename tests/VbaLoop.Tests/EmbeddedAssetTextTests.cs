@@ -18,6 +18,7 @@ public class EmbeddedAssetTextTests
         new object[] { "VbaLoop.assets.SkillMd" },
         new object[] { "VbaLoop.assets.PitfallsMd" },
         new object[] { "VbaLoop.assets.DistMd" },
+        new object[] { "VbaLoop.assets.FormsMd" },
     };
 
     [Theory]

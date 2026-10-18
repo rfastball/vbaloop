@@ -1,0 +1,89 @@
+{
+  "name": "frmMemo",
+  "caption": "작업 메모",
+  "width": 282,
+  "height": 292,
+  "controls": [
+    {
+      "type": "Label",
+      "name": "lblName",
+      "caption": "이름",
+      "left": 14,
+      "top": 14,
+      "width": 46,
+      "height": 18
+    },
+    {
+      "type": "TextBox",
+      "name": "txtName",
+      "text": "김하늘",
+      "left": 64,
+      "top": 10,
+      "width": 186,
+      "height": 24
+    },
+    {
+      "type": "Label",
+      "name": "lblMemo",
+      "caption": "메모",
+      "left": 14,
+      "top": 48,
+      "width": 80,
+      "height": 18
+    },
+    {
+      "type": "TextBox",
+      "name": "txtMemo",
+      "text": "JSON과 VBA로 첫 폼을 만들었습니다.",
+      "left": 14,
+      "top": 70,
+      "width": 236,
+      "height": 70
+    },
+    {
+      "type": "CommandButton",
+      "name": "cmdPreview",
+      "caption": "미리보기",
+      "left": 150,
+      "top": 207,
+      "width": 100,
+      "height": 26
+    },
+    {
+      "type": "CommandButton",
+      "name": "cmdReset",
+      "caption": "초기화",
+      "left": 14,
+      "top": 207,
+      "width": 60,
+      "height": 26
+    },
+    {
+      "type": "Label",
+      "name": "lblResult",
+      "caption": "입력한 내용을 미리 확인하세요.",
+      "left": 14,
+      "top": 151,
+      "width": 236,
+      "height": 44
+    },
+    {
+      "type": "Label",
+      "name": "lblFootnote",
+      "caption": "시연용 · 시트에 저장하지 않습니다.",
+      "left": 14,
+      "top": 243,
+      "width": 236,
+      "height": 16
+    },
+    {
+      "type": "CommandButton",
+      "name": "cmdClose",
+      "caption": "닫기",
+      "left": 82,
+      "top": 207,
+      "width": 60,
+      "height": 26
+    }
+  ]
+}

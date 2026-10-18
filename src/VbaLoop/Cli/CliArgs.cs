@@ -27,6 +27,8 @@ public sealed class CliArgs
     public string? Macro { get; private set; }
     /// <summary>diff 전용: 단일 모듈로 좁히고 워크북 쪽 본문을 덤프.</summary>
     public string? Module { get; private set; }
+    public string? Spec { get; private set; }
+    public string? Code { get; private set; }
     /// <summary>dist 전용: 배포 아티팩트 출력 경로(선택, 생략 시 dist/&lt;워크북명&gt;.xlsm).
     /// 확장자로 형식 선언 — .xlsm(매크로 워크북) / .xlam(애드인).</summary>
     public string? Out { get; private set; }
@@ -106,6 +108,14 @@ public sealed class CliArgs
                     if (++i >= args.Length) throw new CliError("--module requires a module name");
                     r.Module = args[i];
                     break;
+                case "--spec":
+                    if (++i >= args.Length || args[i].StartsWith('-')) throw new CliError("--spec requires a JSON path");
+                    r.Spec = args[i];
+                    break;
+                case "--code":
+                    if (++i >= args.Length || args[i].StartsWith('-')) throw new CliError("--code requires a VBA path");
+                    r.Code = args[i];
+                    break;
                 case "--out":
                     if (++i >= args.Length) throw new CliError("--out requires an output path");
                     r.Out = args[i];
@@ -145,7 +155,7 @@ public sealed class CliArgs
                 default:
                     if (args[i].StartsWith('-'))
                         throw new CliError($"unknown option: {args[i]}",
-                            "Supported options: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <seconds> --config <path> --module <name> --out <path> --bootstrap <Module.Proc> --folder <path> --workbook <path> --new <name> --strip-comments");
+                            "Supported options: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <seconds> --config <path> --module <name> --out <path> --bootstrap <Module.Proc> --folder <path> --workbook <path> --new <name> --spec <design.json> --code <body.vba> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }
@@ -173,7 +183,7 @@ public sealed class CliArgs
     public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
     {
         "--timeout", "--config", "--runid", "--session-meta", "--macro", "--module",
-        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup",
+        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup", "--spec", "--code",
     };
 
     /// <summary>

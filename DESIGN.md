@@ -174,6 +174,22 @@ managed_by = "0.3.0"
 cwd에서 위로 올라가며 처음 만나는 `vbaloop.toml`의 위치가 프로젝트 루트다. 파서는 지원하는 부분집합
 (문자열, bool, 정수, 문자열 배열, 주석)만 읽고, 그 밖의 문법은 조용히 무시하지 않고 오류로 거부한다.
 
+### 폼 신규 생성 (`form build`)
+
+`form build --spec <json> --code <vba> [--force]`는 프로젝트 mutex와 lease를 획득해
+별도의 도구 소유 Excel에서 JSON 디자인을 `VBComponents.Add(3)`와 MSForms로 구성한다.
+strict UTF-8 및 ACP 가드, 필드·타입·이름·치수 검증은 Excel 실행 전에 완료한다.
+지원 컨트롤은 Label/TextBox/CommandButton/Frame이며 임의 ProgID/속성 호출은 허용하지 않는다.
+코드는 VbaProjectOps.ReplaceCode를 재사용한다. Export/Import 후 속성·코드를 검증하고
+정규 UTF-8 frm와 binary frx를 src에 게시한다. 전체 컴파일은 타 모듈 참조가 있는 폼도
+지원하기 위해 기존 push 게이트에 맡긴다. build는 사용자 코드를 실행하지 않는다.
+
+기존 쌍은 --force 없이는 덮어쓰지 않는다. 게시 중 오류는 교체한 파일을 복원하며,
+복원 실패 시 `_dbg/form-build/<id>` 백업을 보존하고 push 금지 안내를 준다.
+두 파일의 게시가 프로세스 강제 종료까지 원자적인 것은 아니다. 중단 뒤에는 재build 후 push한다.
+JSON/VBA는 생성 입력이며 push 지문에는 생성된 frm/frx만 포함된다. pull은 생성 입력을
+역갱신하지 않는다. 기존 폼 재Import 복구/poison 및 pull FRX 잡음 정책은 별도다.
+
 ## 6. 쓰지 않는 API
 
 - `GetActiveObject`(ROT): 임의의 Excel 인스턴스를 돌려줘 대상을 특정할 수 없다. 재attach는 HWND의

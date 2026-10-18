@@ -92,6 +92,7 @@ internal static class Program
                 "recovery" => RecoveryCommand.Run(opts),
                 "pull" => PullCommand.Run(opts),
                 "push" => PushCommand.Run(opts),
+                "form" => FormCommand.Run(opts),
                 "test" => TestCommand.Run(opts),
                 "lease" => LeaseCommand.Run(opts),
                 "lint" => LintCommand.Run(opts),
@@ -184,7 +185,7 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <name>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "test", "run <Module.Proc>", "dist [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <title> | --list", "version", "update [--check] [--yes] [--force]" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <name>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "form build --spec <design.json> --code <body.vba> [--force]", "test", "run <Module.Proc>", "dist [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <title> | --list", "version", "update [--check] [--yes] [--force]" } };
         return o;
     }
 
@@ -209,6 +210,7 @@ internal static class Program
           vbaloop pull    [--json] [--force]       workbook -> src (blocked if src has unsynced edits)
           vbaloop push    [--json] [--force] [--prune] [--force-form-import] [--skip-compile]   src -> workbook (in-place injection -> save only if VBE compile passes; --force bypasses the fingerprint cache and re-injects everything)
           vbaloop test    [--json] [--timeout N]   run/read Test_* procedures
+          vbaloop form build --spec <design.json> --code <body.vba> [--force] [--json]   generate src frm/frx in private Excel; then push
           vbaloop run     <Module.Proc> [--timeout N]   run a single arbitrary macro
           vbaloop dist    [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   clean-copy distribution build (§9, VBE compile check before publishing, .xlam also supported)
           vbaloop rollback --list | --latest | --backup <id> [--json]   restore the workbook from a pre-push backup (only while no persistent session is running)

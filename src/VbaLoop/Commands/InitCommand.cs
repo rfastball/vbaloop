@@ -39,8 +39,9 @@ public static class InitCommand
         var skillLines = LoadAssetLines("VbaLoop.assets.SkillMd");
         var pitfallLines = LoadAssetLines("VbaLoop.assets.PitfallsMd");
         var distLines = LoadAssetLines("VbaLoop.assets.DistMd");
+        var formsLines = LoadAssetLines("VbaLoop.assets.FormsMd");
 
-        var items = Onboarding.Analyze(root, tomlPath, shimLines, docsBody, skillLines, pitfallLines, distLines,
+        var items = Onboarding.Analyze(root, tomlPath, shimLines, docsBody, skillLines, pitfallLines, distLines, formsLines,
             ManagedStamp.StampToWrite(exe, stampState));
 
         if (opts.Check)
@@ -146,6 +147,7 @@ public static class InitCommand
         var skillLines = LoadAssetLines("VbaLoop.assets.SkillMd");
         var pitfallLines = LoadAssetLines("VbaLoop.assets.PitfallsMd");
         var distLines = LoadAssetLines("VbaLoop.assets.DistMd");
+        var formsLines = LoadAssetLines("VbaLoop.assets.FormsMd");
 
         var exe = ExeVersion.Current;
         var rows = new List<object>();
@@ -169,7 +171,7 @@ public static class InitCommand
             }
             try
             {
-                var items = Onboarding.Analyze(root, tomlPath, shimLines, docsBody, skillLines, pitfallLines, distLines,
+                var items = Onboarding.Analyze(root, tomlPath, shimLines, docsBody, skillLines, pitfallLines, distLines, formsLines,
                     ManagedStamp.StampToWrite(exe, stampState));
                 if (opts.Check)
                 {

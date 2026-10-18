@@ -12,6 +12,9 @@ public class OnboardingTests
     private static readonly string[] Skill = { "---", "name: vbaloop", "---", "# 스킬 v1" };
     private static readonly string[] Pitfalls = { "# VBA pitfall 참조 v1", "", "- 항목 1" };
     private static readonly string[] Dist = { "# vbaloop dist v1", "", "배포 절차" };
+    private static readonly string[] Forms = { "# Forms playbook", "Design and events" };
+    private static readonly string FormsRelPath =
+        System.IO.Path.Combine(".claude", "skills", "vbaloop", "references", "forms.md");
     private static readonly string SkillRelPath =
         System.IO.Path.Combine(".claude", "skills", "vbaloop", "SKILL.md");
     private static readonly string PitfallsRelPath =
@@ -109,8 +112,8 @@ public class OnboardingTests
     {
         using var t = new TempDir();
         t.File("Book.xlsm");
-        var items = Onboarding.Analyze(t.Path, tomlPath: null, Shim, DocsBody, Skill, Pitfalls, Dist);
-        Assert.Equal(new[] { "vbaloop.toml", System.IO.Path.Combine("src", "LogShim.bas"), "CLAUDE.md", "AGENTS.md", SkillRelPath, PitfallsRelPath, DistRelPath, ".gitignore" },
+        var items = Onboarding.Analyze(t.Path, tomlPath: null, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
+        Assert.Equal(new[] { "vbaloop.toml", System.IO.Path.Combine("src", "LogShim.bas"), "CLAUDE.md", "AGENTS.md", SkillRelPath, PitfallsRelPath, DistRelPath, FormsRelPath, ".gitignore" },
             items.Select(i => i.Name).ToArray());
         Assert.All(items, i => Assert.Equal(ArtifactStatus.Missing, i.Status));
         Assert.Contains("workbook = \"Book.xlsm\"", items[0].NewContent);
@@ -122,14 +125,14 @@ public class OnboardingTests
     {
         using var t = new TempDir();
         t.File("Book.xlsm");
-        var first = Onboarding.Apply(Onboarding.Analyze(t.Path, null, Shim, DocsBody, Skill, Pitfalls, Dist));
+        var first = Onboarding.Apply(Onboarding.Analyze(t.Path, null, Shim, DocsBody, Skill, Pitfalls, Dist, Forms));
         Assert.All(first, r => Assert.Equal(ArtifactAction.Created, r.Action));
         Assert.True(File.Exists(System.IO.Path.Combine(t.Path, SkillRelPath))); // 중첩 디렉토리 생성
         Assert.True(File.Exists(System.IO.Path.Combine(t.Path, PitfallsRelPath))); // references/ 하위
 
         var tomlPath = ProjectConfig.FindTomlPath(null, t.Path);
         Assert.NotNull(tomlPath);
-        var again = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
+        var again = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
         Assert.All(again, i => Assert.Equal(ArtifactStatus.Ok, i.Status));
 
         var second = Onboarding.Apply(again);
@@ -144,7 +147,7 @@ public class OnboardingTests
         var tomlPath = t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("P", "Book.xlsm"));
         t.File(System.IO.Path.Combine("src", "LogShim.bas"), "옛 버전\r\n");
         t.File("CLAUDE.md", "# P\n\n## 개발 루프 (vbaloop)\n옛 절차\n");
-        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
+        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
         Assert.Equal(ArtifactStatus.Ok, items[0].Status);       // toml
         Assert.Equal(ArtifactStatus.Drift, items[1].Status);    // shim
         Assert.Equal(ArtifactStatus.Drift, items[2].Status);    // CLAUDE.md (마커 없는 블록 헤딩)
@@ -160,7 +163,7 @@ public class OnboardingTests
         t.File("Book.xlsm");
         var tomlPath = t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("P", "Book.xlsm"));
         t.File(SkillRelPath, "# 손댄 스킬\r\n");
-        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
+        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
         var skillItem = items.Single(i => i.Name == SkillRelPath);
         Assert.Equal(ArtifactStatus.Drift, skillItem.Status);
 
@@ -171,22 +174,26 @@ public class OnboardingTests
             System.IO.Path.Combine(t.Path, SkillRelPath), Skill)); // 정본 수렴
     }
 
-    [Fact]
-    public void Analyze_DriftedPitfalls_ReportsDriftAndOverwrites()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Analyze_DriftedReference_ReportsDriftAndOverwrites(bool forms)
     {
+        var referencePath = forms ? FormsRelPath : PitfallsRelPath;
+        var referenceLines = forms ? Forms : Pitfalls;
         using var t = new TempDir();
         t.File("Book.xlsm");
         var tomlPath = t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("P", "Book.xlsm"));
-        t.File(PitfallsRelPath, "# 프로젝트에서 직접 고친 사본\r\n");
-        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
-        var item = items.Single(i => i.Name == PitfallsRelPath);
+        t.File(referencePath, "# 프로젝트에서 직접 고친 사본\r\n");
+        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
+        var item = items.Single(i => i.Name == referencePath);
         Assert.Equal(ArtifactStatus.Drift, item.Status);
 
         var results = Onboarding.Apply(items);
         Assert.Equal(ArtifactAction.Overwritten,
-            results.Single(r => r.Item.Name == PitfallsRelPath).Action);
+            results.Single(r => r.Item.Name == referencePath).Action);
         Assert.False(Onboarding.IsWholeFileDrifted(
-            System.IO.Path.Combine(t.Path, PitfallsRelPath), Pitfalls)); // 정본 수렴
+            System.IO.Path.Combine(t.Path, referencePath), referenceLines)); // 정본 수렴
     }
 
     [Fact]
@@ -196,7 +203,7 @@ public class OnboardingTests
         t.File("Book.xlsm");
         var tomlPath = t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("P", "Book.xlsm"));
         t.File(".gitignore", "*.bak\r\nsecret.txt\r\n");
-        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
+        var items = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
         var gi = items.Single(i => i.Name == ".gitignore");
         Assert.Equal(ArtifactStatus.Drift, gi.Status); // 파일은 있으나 관리 블록 부재
 
@@ -209,7 +216,7 @@ public class OnboardingTests
         Assert.Contains("_dbg/", text);
 
         // 멱등: 재분석 시 Ok
-        var again = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist);
+        var again = Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
         Assert.Equal(ArtifactStatus.Ok, again.Single(i => i.Name == ".gitignore").Status);
     }
 
@@ -234,7 +241,7 @@ public class OnboardingTests
             try
             {
                 var items = Onboarding.Analyze(root, System.IO.Path.Combine(root, "vbaloop.toml"),
-                    Shim, DocsBody, Skill, Pitfalls, Dist);
+                    Shim, DocsBody, Skill, Pitfalls, Dist, Forms);
                 Onboarding.Apply(items);
                 outcomes.Add((name, true));
             }
@@ -249,6 +256,6 @@ public class OnboardingTests
     {
         using var t = new TempDir();
         var tomlPath = t.File("vbaloop.toml", "[excel]\nworkbook = \n");
-        Assert.Throws<CliError>(() => Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist));
+        Assert.Throws<CliError>(() => Onboarding.Analyze(t.Path, tomlPath, Shim, DocsBody, Skill, Pitfalls, Dist, Forms));
     }
 }

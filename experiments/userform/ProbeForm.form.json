@@ -1,0 +1,15 @@
+{
+  "name": "ProbeForm",
+  "caption": "신규 폼 작성 실험",
+  "width": 300,
+  "height": 220,
+  "controls": [
+    { "type": "CommandButton", "name": "cmdProbe", "caption": "Before", "left": 18, "top": 18, "width": 90, "height": 24 },
+    { "type": "Label", "name": "lblStatus", "caption": "이름을 입력하세요", "left": 18, "top": 140, "width": 240, "height": 18 },
+    { "type": "Frame", "name": "fraGroup", "caption": "입력", "left": 18, "top": 55, "width": 240, "height": 70,
+      "controls": [
+        { "type": "TextBox", "name": "txtName", "text": "한글 입력", "left": 12, "top": 20, "width": 200, "height": 20 }
+      ]
+    }
+  ]
+}

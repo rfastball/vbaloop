@@ -183,6 +183,7 @@ End Sub
 | `status` | 세션 상태, src가 워크북에 반영됐는지 |
 | `session start\|attach\|stop` | 계속 띄워 두는 Excel 세션 시작, 이미 열린 워크북 채택, 종료(`--no-save`, `--discard`) |
 | `push [--force] [--prune] [--skip-compile]` | src를 워크북에 반영. 컴파일이 통과해야 저장한다 |
+| `form build --spec <json> --code <vba> [--force]` | JSON 디자인과 VBA 코드로 src에 frm/frx 생성. 이후 `push`로 적용 |
 | `pull [--force]` | 워크북 코드를 src로 가져오기 |
 | `diff [--module <이름>]` | 워크북과 src 비교(아무것도 바꾸지 않음) |
 | `test [--timeout <초>]` | `Test_*` 테스트 실행 |
@@ -200,6 +201,33 @@ End Sub
   새 버전 알림이 있으면 `update: {current, latest, command}`가 덧붙는다
 - 실패하면 한 줄 에러와 다음에 할 일(`hint`)을 알려 준다.
 - 종료 코드: 성공 0 / 환경 오류 3(세션·Excel 문제, 사용 중, 격리) / 그 외 2
+
+### 에이전트가 폼을 처음부터 작성하기
+
+기존 폼이나 FRX 템플릿 없이 디자인 JSON과 VBA 본문 두 파일을 작성한다.
+[디자인 예제](experiments/userform/ProbeForm.form.json) · [이벤트 코드 예제](experiments/userform/ProbeForm.code.vba)
+
+```powershell
+vbaloop form build --spec forms/ProbeForm.form.json --code forms/ProbeForm.code.vba --json
+vbaloop push --json
+```
+
+폼을 작성하기 전에 [UserForm 플레이북](assets/vbaloop-skill/references/forms.md)을 참고한다.
+VBA 전용 배치·키보드·이벤트·수명 관리 규칙과 검증 절차를 담았으며, `init`으로 각 프로젝트의 스킬 참조에 설치된다.
+
+`form build`는 별도의 숨은 Excel에서 폼을 생성·Export·재Import 검증하고 설정된 src에
+UTF-8 `.frm`과 `.frx`를 기록한다. 대상 워크북에 저장하는 단계는 기존 `push`이며,
+전체 프로젝트 컴파일 검사와 백업 정책이 그대로 적용된다.
+
+지원 컨트롤은 Label, TextBox, CommandButton, Frame(중첩 가능)이다.
+폼에는 `name/width/height`, 컨트롤에는 `type/name/left/top/width/height`가 필요하다.
+문자열은 선택적 `caption`(TextBox는 `text`), 자식 배열은 폼과 Frame의 `controls`로 지정한다.
+위치·크기는 point 단위다. 코드 파일에는 Export 헤더나 Attribute 없이 이벤트 VBA 본문만 작성한다.
+
+재생성은 `form build ... --force`로 한다. JSON/VBA가 생성 원본이며 **기존 frm/frx 편집을
+통째로 대체**한다. 입력 파일은 src 밖에 두고, 변경할 때마다 build 후 push한다.
+`push`는 JSON/VBA를 자동으로 빌드하지 않고, `pull`도 JSON/VBA를 갱신하지 않는다.
+그림·MultiPage·TabStrip·외부 ActiveX는 아직 지원하지 않는다.
 
 ## 설정 (`vbaloop.toml`)
 

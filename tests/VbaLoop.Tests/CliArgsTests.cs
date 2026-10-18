@@ -5,6 +5,21 @@ namespace VbaLoop.Tests;
 
 public class CliArgsTests
 {
+    [Fact]
+    public void FormInputsAreValuesAndRequired()
+    {
+        var args = CliArgs.Parse(new[] { "build", "--spec", "a.json", "--code", "a.vba", "--force", "--json" });
+        Assert.Equal("a.json", args.Spec);
+        Assert.Equal("a.vba", args.Code);
+        Assert.Equal(new[] { "build" }, args.Positional);
+        Assert.True(args.Force && args.Json);
+        foreach (string option in new[] { "--spec", "--code" })
+        {
+            Assert.Throws<VbaLoop.Core.CliError>(() => CliArgs.Parse(new[] { option }));
+            Assert.Throws<VbaLoop.Core.CliError>(() => CliArgs.Parse(new[] { option, "--json" }));
+            Assert.False(CliArgs.RawArgsRequestJson(new[] { option, "--json" }));
+        }
+    }
     [Theory]
     // 파싱이 실패해도(--오타플래그) raw argv의 --json은 감지돼야 한다
     [InlineData(new[] { "push", "--json", "--badflag" }, true)]

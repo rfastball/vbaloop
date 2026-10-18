@@ -65,6 +65,13 @@ Commands obtain Excel on their own. How is set by `[excel] session` in `vbaloop.
 
 Only `Public Sub Test_*()` (no arguments) are collected as tests. Assert with `LogShim.AssertEq`.
 
+## UserForm design and code
+
+Before creating or redesigning a UserForm, read [references/forms.md](references/forms.md).
+It covers design decisions, VBA event/lifetime rules, conditional styling tricks, the
+JSON/VBA authoring contract and acceptance checks. Start with the user's workflow and
+keyboard behavior; do not choose layout merely because it is easy to generate.
+
 ## Failure playbooks
 
 ### exe older than the project (exe-older)

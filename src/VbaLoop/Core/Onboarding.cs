@@ -4,8 +4,8 @@ public enum ArtifactStatus { Ok, Missing, Drift }
 public enum ArtifactAction { Created, Overwritten, Unchanged }
 
 /// <summary>
-/// init(온보딩 부트스트래퍼)의 순수 로직 (v1.1). 관리 아티팩트 8종을
-/// toml -> shim -> CLAUDE.md -> AGENTS.md -> 스킬 -> pitfall 참조 -> dist 참조 -> .gitignore 순으로 분석/수렴한다.
+/// init(온보딩 부트스트래퍼)의 순수 로직 (v1.1). 관리 아티팩트 9종을
+/// toml -> shim -> CLAUDE.md -> AGENTS.md -> 스킬 -> pitfall 참조 -> dist 참조 -> forms 참조 -> .gitignore 순으로 분석/수렴한다.
 /// toml은 관리 스탬프([vbaloop] managed_by, 설계 §12)만 라인 단위로 갱신한다 — 다른 아티팩트를 쓰거나
 /// 스탬프가 없을 때. toml이 목록 첫 항목이라 스탬프가 먼저 기록된다(중간 실패 시에도 스탬프가 파일보다
 /// 낮게 남지 않아 더 오래된 exe의 다운그레이드를 막는 쪽으로 실패한다).
@@ -25,7 +25,7 @@ public static class Onboarding
         public string? Detail { get; init; }
     }
 
-    /// <summary>8종 아티팩트 상태 + 기록 내용 준비. tomlPath가 null이면 워크북 추론으로
+    /// <summary>9종 아티팩트 상태 + 기록 내용 준비. tomlPath가 null이면 워크북 추론으로
     /// 스캐폴드를 준비하고, 추론 불가(0개/복수)면 CliError. 기존 toml 파싱 실패도 CliError
     /// (사용자 소유 파일은 절대 덮어쓰지 않으므로 수렴 불가 = 에러).
     /// stampVersion: 관리 파일을 쓸 때 기록할 exe 버전(null이면 스탬프를 다루지 않음). 호출자가
@@ -33,7 +33,7 @@ public static class Onboarding
     public static List<Item> Analyze(string root, string? tomlPath,
         IReadOnlyList<string> shimCanonicalLines, IReadOnlyList<string> docsBodyLines,
         IReadOnlyList<string> skillCanonicalLines, IReadOnlyList<string> pitfallsCanonicalLines,
-        IReadOnlyList<string> distCanonicalLines, string? stampVersion = null)
+        IReadOnlyList<string> distCanonicalLines, IReadOnlyList<string> formsCanonicalLines, string? stampVersion = null)
     {
         var items = new List<Item>();
         string srcRoot;
@@ -128,6 +128,20 @@ public static class Onboarding
             Path = distPath,
             Status = distStatus,
             NewContent = distStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(distCanonicalLines),
+        });
+
+        // UserForm design/code playbook (whole-file-owned).
+        var formsPath = System.IO.Path.Combine(
+            root, ".claude", "skills", "vbaloop", "references", "forms.md");
+        var formsStatus = !File.Exists(formsPath) ? ArtifactStatus.Missing
+            : IsWholeFileDrifted(formsPath, formsCanonicalLines) ? ArtifactStatus.Drift
+            : ArtifactStatus.Ok;
+        items.Add(new Item
+        {
+            Name = System.IO.Path.GetRelativePath(root, formsPath),
+            Path = formsPath,
+            Status = formsStatus,
+            NewContent = formsStatus == ArtifactStatus.Ok ? null : CanonicalText.ToCanonical(formsCanonicalLines),
         });
 
         // .gitignore 관리 블록 (사용자 소유 파일 부분 관리 — CLAUDE.md와 동형 upsert).

@@ -8,6 +8,11 @@ with init; ask the user to run `vbaloop update` (do not edit or delete the manag
 Write project-specific content outside this managed block (init overwrites the inside of the block).
 
 1. Edit: change src\*.bas/.cls/.frm
+   New UserForm: write JSON and plain VBA outside src, then
+   `vbaloop form build --spec forms/MyForm.json --code forms/MyForm.vba --json` -> push.
+   No template or hand-written FRX is needed. Before form work, read
+   `.claude/skills/vbaloop/references/forms.md` for design, code rules and schema.
+   Rebuild with --force only to replace the generated pair from those inputs.
 2. Session: ephemeral by default - push/pull/test/run/diff start a hidden Excel per command and close it (vbaloop.toml
    [excel] session). If a session opened with session start/attach is alive, it is used
 3. Inject: vbaloop push (src -> in-place injection into the workbook -> saved only if the VBE compile passes; supports --prune/--force.

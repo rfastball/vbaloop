@@ -249,7 +249,7 @@ public class ManagedStampTests
     {
         using var t = new TempDir();
         t.File("Book.xlsm");
-        var items = Onboarding.Analyze(t.Path, null, Shim, Body, Doc, Doc, Doc, stampVersion: "0.5.0");
+        var items = Onboarding.Analyze(t.Path, null, Shim, Body, Doc, Doc, Doc, Doc, stampVersion: "0.5.0");
         Assert.Equal("0.5.0", ManagedStamp.Read(items[0].NewContent!));
         Assert.Contains("workbook = \"Book.xlsm\"", items[0].NewContent);
     }
@@ -261,7 +261,7 @@ public class ManagedStampTests
         t.File("Book.xlsm");
         var path = t.File("vbaloop.toml", ManagedStamp.Upsert(Onboarding.BuildTomlScaffold("P", "Book.xlsm"), "0.9.0"));
         // 다른 관리 파일이 전부 Missing(쓰기 발생)이어도 더 낮은 버전으로는 기록하지 않는다
-        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc, stampVersion: "0.5.0");
+        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc, Doc, stampVersion: "0.5.0");
         Assert.Equal(ArtifactStatus.Ok, items[0].Status);
         Assert.Null(items[0].NewContent);
     }
@@ -272,7 +272,7 @@ public class ManagedStampTests
         using var t = new TempDir();
         t.File("Book.xlsm");
         var path = t.File("vbaloop.toml", ManagedStamp.Upsert(Onboarding.BuildTomlScaffold("P", "Book.xlsm"), "0.4.0"));
-        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc, stampVersion: "0.5.0");
+        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc, Doc, stampVersion: "0.5.0");
         Assert.Equal(ArtifactStatus.Drift, items[0].Status);
         Assert.Equal("managed_by 0.4.0 -> 0.5.0", items[0].Detail);
         Onboarding.Apply(items);
@@ -286,7 +286,7 @@ public class ManagedStampTests
         using var t = new TempDir();
         t.File("Book.xlsm");
         var path = t.File("vbaloop.toml", Onboarding.BuildTomlScaffold("P", "Book.xlsm"));
-        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc);
+        var items = Onboarding.Analyze(t.Path, path, Shim, Body, Doc, Doc, Doc, Doc);
         Assert.Equal(ArtifactStatus.Ok, items[0].Status);
     }
 

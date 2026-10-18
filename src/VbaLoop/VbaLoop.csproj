@@ -62,6 +62,7 @@
     <EmbeddedResource Include="..\..\assets\vbaloop-skill\SKILL.md" LogicalName="VbaLoop.assets.SkillMd" />
     <EmbeddedResource Include="..\..\assets\vbaloop-skill\references\vba-pitfalls.md" LogicalName="VbaLoop.assets.PitfallsMd" />
     <EmbeddedResource Include="..\..\assets\vbaloop-skill\references\dist.md" LogicalName="VbaLoop.assets.DistMd" />
+    <EmbeddedResource Include="..\..\assets\vbaloop-skill\references\forms.md" LogicalName="VbaLoop.assets.FormsMd" />
   </ItemGroup>
 
 </Project>
