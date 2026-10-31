@@ -78,6 +78,22 @@ public class LeaseFileTests
     }
 
     [Fact]
+    public void EnvWithAgentPid_DeadAgent_ReclaimedImmediately()
+    {
+        Assert.True(Reclaimable(Owner(source: "env", pid: 55, expiresInSec: 600), alive: false));
+        Assert.False(Reclaimable(Owner(source: "env", pid: 55, expiresInSec: 600), alive: true));
+    }
+
+    [Fact]
+    public void OwnerAlive_BoundaryProcessCountsAsDead()
+    {
+        // 구버전이 sihost에 귀속시킨 lease: 살아있어도 vbaloop를 호출할 수 없는 프로세스 → 회수
+        Assert.False(LeaseService.IsOwnerAlive(8352, "ST", (_, _) => true, _ => true));
+        Assert.True(LeaseService.IsOwnerAlive(80, "ST", (_, _) => true, _ => false));
+        Assert.False(LeaseService.IsOwnerAlive(80, "ST", (_, _) => false, _ => false));
+    }
+
+    [Fact]
     public void UnparsableExpiry_TreatedAsExpired()
     {
         var o = Owner(source: "weak", pid: null);

@@ -144,7 +144,8 @@ public static class LeaseFile
 
         bool idleExpired = IsExpiredBy(owner.ExpiresAt, ReclaimGraceSeconds, utcNow);
 
-        if (owner.OwnerSource == "process" && owner.AgentPid is int pid && pid > 0)
+        // process, 또는 에이전트 PID가 묶인 env(CLAUDE_PID 등)
+        if (owner.AgentPid is int pid && pid > 0)
         {
             // 에이전트 프로세스 사망/PID 재사용 → 즉시 회수.
             // 살아있어도 유휴 백스톱(만료+grace) 경과면 회수 — 자동 획득 모델의 영구 점유 방지.
@@ -152,7 +153,7 @@ public static class LeaseFile
             return idleExpired;
         }
 
-        // env/weak(또는 pid 없는 process): 프로세스로 판정 불가 — 유휴 백스톱만
+        // weak, 또는 pid 없는 env/process: 프로세스로 판정 불가 — 유휴 백스톱만
         return idleExpired;
     }
 

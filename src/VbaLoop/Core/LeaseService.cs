@@ -25,7 +25,7 @@ public static class LeaseService
         bool mine = owner != null &&
                     LeaseFile.IsOwnedBy(owner, id.Thread, Environment.MachineName, Environment.UserName);
         bool reclaimable = present && LeaseFile.IsAutoReclaimable(
-            owner, now, ProcessIdentity.IsAlive, Environment.MachineName,
+            owner, now, IsOwnerAlive, Environment.MachineName,
             SafeLastWriteUtc(path));
         double idle = owner != null ? LeaseFile.IdleSeconds(owner, now) : double.NaN;
         return new LeaseState(owner, present, mine, reclaimable, idle);
@@ -58,12 +58,16 @@ public static class LeaseService
 
             if (owner != null && LeaseFile.IsOwnedBy(owner, id.Thread, Environment.MachineName, Environment.UserName))
             {
+                // env 소유자는 같은 세션 id라도 에이전트 프로세스가 바뀔 수 있다(세션 resume) —
+                // 옛 PID가 남으면 살아있는 세션의 lease가 사망 회수 대상이 된다
+                owner.AgentPid = id.AgentPid;
+                owner.AgentStartTime = id.AgentStartTime;
                 LeaseFile.Touch(owner, command, now);
                 LeaseFile.Save(path, owner);
                 return AcquireOutcome.Renewed;
             }
 
-            if (LeaseFile.IsAutoReclaimable(owner, now, ProcessIdentity.IsAlive,
+            if (LeaseFile.IsAutoReclaimable(owner, now, IsOwnerAlive,
                     Environment.MachineName, SafeLastWriteUtc(path)))
             {
                 LeaseFile.Delete(path);
@@ -117,6 +121,16 @@ public static class LeaseService
         LeaseFile.Touch(owner, command, now);
         return owner;
     }
+
+    /// <summary>회수 판정용 생존 — 경계 프로세스(sihost 등)는 vbaloop를 호출하는 에이전트일 수 없으므로
+    /// 죽은 것으로 본다. 현 계보 탐색은 경계를 후보로 고르지 않으니 구버전이 남긴 lease에만 해당.</summary>
+    public static bool IsOwnerAlive(int pid, string? startTimeIso)
+        => IsOwnerAlive(pid, startTimeIso, ProcessIdentity.IsAlive, AgentIdentity.IsBoundaryProcess);
+
+    /// <summary>의존성 주입 버전 (단위 테스트 대상).</summary>
+    public static bool IsOwnerAlive(int pid, string? startTimeIso,
+        Func<int, string?, bool> isProcessAlive, Func<int, bool> isBoundaryProcess)
+        => isProcessAlive(pid, startTimeIso) && !isBoundaryProcess(pid);
 
     private static DateTime? SafeLastWriteUtc(string path)
     {

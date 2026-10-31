@@ -83,6 +83,65 @@ public class AgentIdentityTests
         Assert.Null(id.AgentPid);
     }
 
+    private static Func<string, string?> Env(params (string Name, string Value)[] vars)
+        => n => vars.FirstOrDefault(v => v.Name == n).Value;
+
+    [Fact]
+    public void Resolve_ClaudeCodeSessionId_BindsClaudePid()
+    {
+        // 고아 백그라운드 체인: vbaloop(100) <- bash(90) <- (죽은 부모) — 계보는 끊겨도 env는 남는다
+        var table = Table((100, 90, "vbaloop"), (90, 77, "bash"));
+        var starts = Starts((100, 50), (90, 40), (55, 10));
+        var id = AgentIdentity.Resolve(@"C:\proj",
+            Env(("CLAUDE_CODE_SESSION_ID", "872762ef"), ("CLAUDE_PID", "55")), table, 100, starts);
+        Assert.Equal("env", id.Source);
+        Assert.Equal("env:CLAUDE_CODE_SESSION_ID:872762ef", id.Thread);
+        Assert.Equal(55, id.AgentPid);
+        Assert.Equal(T0.AddMinutes(10).ToString("o"), id.AgentStartTime);
+    }
+
+    [Fact]
+    public void Resolve_ClaudePidUnusable_KeepsEnvIdWithoutPid()
+    {
+        var table = Table((100, 90, "vbaloop"), (90, 1, "bash"));
+        var starts = Starts((100, 50), (90, 40), (56, 60));
+        foreach (var pid in new[] { "abc", "0", "100", "99", "56" }) // 비정수/0/자기 자신/죽음/자기보다 최신(PID 재사용)
+        {
+            var id = AgentIdentity.Resolve(@"C:\proj",
+                Env(("CLAUDE_CODE_SESSION_ID", "s"), ("CLAUDE_PID", pid)), table, 100, starts);
+            Assert.Equal("env:CLAUDE_CODE_SESSION_ID:s", id.Thread);
+            Assert.Null(id.AgentPid);
+            Assert.Null(id.AgentStartTime);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ClaudePidAlone_DoesNotBindOtherEnvIds()
+    {
+        // 사용자 명시 VBALOOP_SESSION_ID는 Claude 세션 수명에 묶지 않는다
+        var table = Table((100, 1, "vbaloop"));
+        var starts = Starts((100, 50), (55, 10));
+        var id = AgentIdentity.Resolve(@"C:\proj",
+            Env(("VBALOOP_SESSION_ID", "mine"), ("CLAUDE_CODE_SESSION_ID", "s"), ("CLAUDE_PID", "55")),
+            table, 100, starts);
+        Assert.Equal("env:VBALOOP_SESSION_ID:mine", id.Thread);
+        Assert.Null(id.AgentPid);
+    }
+
+    [Fact]
+    public void ClaudeDesktopChain_StopsAtSihost()
+    {
+        // 실측(2026-10-31): powershell <- cmd <- claude(CLI) <- claude(데스크톱) <- sihost <- svchost.
+        // sihost가 경계가 아니면 로그아웃까지 사는 sihost가 모든 세션 공용 소유자가 된다.
+        var table = Table((100, 90, "vbaloop"), (90, 85, "powershell"), (85, 80, "cmd"),
+                          (80, 70, "claude"), (70, 60, "claude"), (60, 50, "sihost"), (50, 1, "svchost"));
+        var starts = Starts((100, 50), (90, 45), (85, 44), (80, 40), (70, 10), (60, 1), (50, 0));
+
+        var host = AgentIdentity.FindAgentHost(table, 100, starts);
+        Assert.NotNull(host);
+        Assert.Equal(70, host!.Pid);
+    }
+
     [Fact]
     public void Resolve_FallsBackToWeak_WhenNoHostFound()
     {

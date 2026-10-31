@@ -18,15 +18,27 @@ public static class AgentIdentity
 
     public sealed record AgentHost(int Pid, string Name, string StartTimeIso);
 
-    /// <summary>계보 탐색을 멈추는 데스크톱/서비스 경계 프로세스.</summary>
+    /// <summary>계보 탐색을 멈추는 데스크톱/서비스 경계 프로세스.
+    /// sihost: 셸 활성화로 뜬 앱(Claude 데스크톱 등)의 부모 — 로그아웃까지 살아 있어 소유자가 되면
+    /// 생존 회수가 영영 성립하지 않는다(2026-10-31 실측).</summary>
     public static readonly string[] BoundaryNames =
-        { "explorer", "services", "wininit", "winlogon", "svchost", "lsass", "csrss", "smss", "system", "idle" };
+        { "explorer", "sihost", "services", "wininit", "winlogon", "svchost", "lsass", "csrss", "smss", "system", "idle" };
 
     public static readonly string[] ShellNames =
         { "cmd", "powershell", "pwsh", "conhost", "windowsterminal", "openconsole", "bash", "sh", "wsl", "wslhost" };
 
-    public static readonly string[] EnvIdNames =
-        { "VBALOOP_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "AGENT_THREAD_ID" };
+    /// <summary>세션 id 환경변수. PidEnv가 있으면 그 값(에이전트 프로세스 PID)을 생존 판정에 묶어
+    /// env 소유자도 세션 종료 즉시 회수되게 한다.</summary>
+    public sealed record EnvId(string Name, string? PidEnv = null);
+
+    /// <summary>우선순위 순. CLAUDE_CODE_SESSION_ID/CLAUDE_PID는 Claude Code가 Bash 도구 env에 주는 실제 이름
+    /// (2026-10-31 실측) — 부모가 먼저 죽은 백그라운드 셸도 env는 물려받아 계보 단절과 무관하다.
+    /// CLAUDE_SESSION_ID는 구 이름 호환.</summary>
+    public static readonly EnvId[] EnvIds =
+    {
+        new("VBALOOP_SESSION_ID"), new("CODEX_THREAD_ID"), new("CODEX_SESSION_ID"),
+        new("CLAUDE_CODE_SESSION_ID", "CLAUDE_PID"), new("CLAUDE_SESSION_ID"), new("AGENT_THREAD_ID"),
+    };
 
     public static Identity Resolve(string projectPath)
         => Resolve(projectPath, Environment.GetEnvironmentVariable,
@@ -41,11 +53,12 @@ public static class AgentIdentity
         Func<int, DateTime?> startTimeUtcOf)
     {
         // 1순위: 호출자가 주는 유니크 세션 id (env). 프로세스 신원보다 우선(vh와 동일).
-        foreach (var name in EnvIdNames)
+        foreach (var env in EnvIds)
         {
-            var val = getEnv(name);
-            if (!string.IsNullOrWhiteSpace(val))
-                return new Identity($"env:{name}:{val.Trim()}", "env", null, null);
+            var val = getEnv(env.Name);
+            if (string.IsNullOrWhiteSpace(val)) continue;
+            var (pid, start) = EnvAgentProcess(env.PidEnv, getEnv, startPid, startTimeUtcOf);
+            return new Identity($"env:{env.Name}:{val.Trim()}", "env", pid, start);
         }
 
         // 2순위: 프로세스 계보 — 장수 에이전트 호스트의 (PID, StartTime)
@@ -94,6 +107,35 @@ public static class AgentIdentity
             curStart = parentStart;
         }
         return candidate;
+    }
+
+    /// <summary>env가 가리키는 에이전트 프로세스의 (PID, StartTime). 조상 확인은 하지 않는다 — 고아가 된
+    /// 백그라운드 체인에선 살아 있는 에이전트에도 계보가 닿지 않기 때문. 대신 PID 재사용 방어로
+    /// 에이전트가 자기보다 먼저 시작했어야 한다. 해석 불가면 (null, null) = 유휴 백스톱만.</summary>
+    private static (int? Pid, string? StartTimeIso) EnvAgentProcess(
+        string? pidEnv, Func<string, string?> getEnv, int startPid, Func<int, DateTime?> startTimeUtcOf)
+    {
+        if (pidEnv == null || !int.TryParse(getEnv(pidEnv)?.Trim(), out int pid) || pid <= 0 || pid == startPid)
+            return (null, null);
+        var agentStart = startTimeUtcOf(pid);
+        var selfStart = startTimeUtcOf(startPid);
+        if (agentStart == null || (selfStart != null && agentStart > selfStart)) return (null, null);
+        return (pid, agentStart.Value.ToString("o"));
+    }
+
+    /// <summary>pid의 현재 이미지가 경계 프로세스인가 — 구버전이 경계 프로세스(sihost)에 귀속시킨
+    /// lease를 회수하기 위한 판정. 읽기 실패는 false(보수적).</summary>
+    public static bool IsBoundaryProcess(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return BoundaryNames.Contains(p.ProcessName.ToLowerInvariant());
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static DateTime? StartTimeUtcOf(int pid)
