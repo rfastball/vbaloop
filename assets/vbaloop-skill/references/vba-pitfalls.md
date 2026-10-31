@@ -33,6 +33,11 @@ report additions with `vbaloop bugreport` or a GitHub issue (https://github.com/
 
 ## 2. VBA language traps (cross-language intuition betrayed)
 
+- **Reserved/special names as identifiers -> "Syntax error"**: `Public Sub Generate(ByVal scale As Double)` fails to compile
+  (measured 2026-10-31) because `Scale` is a VB6 graphics method with special syntax, like `Line`, `Circle`, `PSet`; keywords
+  (`Type`, `Date`, `Property`, `Step`, `Stop`) fail the same way. The VBE selects the whole line, so push reports the line but no token.
+  On a syntax error in a declaration line, rename its parameters/variables first (`factor`, `lineNo`, `dt`, `kind`).
+
 - **And/Or do not short-circuit**: `If x Is Nothing Or x.Count = 0 Then` evaluates `x.Count` even when x is Nothing
   -> runtime error 91. Split the guard into nested Ifs: `If x Is Nothing Then Exit Sub`.
 - **In Dim i, j As Long, i is a Variant**: every declarator needs its own `As <type>`.
