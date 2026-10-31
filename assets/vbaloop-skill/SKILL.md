@@ -155,8 +155,10 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 - push runs a VBE compile after injection and before saving (ephemeral and persistent mode alike). On a compile error it **does not save** and exits 2 with
   `payload.compile = {result: "compile_error", detail: <modal text>}`. The canonical workbook on disk is in its pre-push state
   (a persistent session is poisoned and restarted from it by the next command)
-- Fix the cause from detail (e.g. "Variable not defined", in Excel's UI language) and push again. The modal does not give the error
-  location, so start with the modules you just changed. Also check `references\vba-pitfalls.md`
+- Fix the cause from detail (e.g. "Variable not defined", in Excel's UI language) and push again. The error location comes from
+  the VBE selection: `payload.compile.location` = `{file, line, token, text, ...}` and the error ends with `at src\Mod.bas:16 'Token' in: <line>`.
+  A syntax error selects the whole line (`token: null`) - look at the identifiers on that line (a reserved word used as a name is a common cause).
+  If `location` is null (could not read), start with the modules you just changed. Also check `references\vba-pitfalls.md`
 - If you are blocked by a pre-existing compile error unrelated to your change (legacy workbook), **after the user confirms** use `push --skip-compile`;
   to turn it off permanently the user sets `[push] compile = false` - do not turn the gate off yourself to get around it
 - `result: "check_failed"` (could not verify) is an environment problem - `doctor --json`, then retry

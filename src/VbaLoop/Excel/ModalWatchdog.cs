@@ -26,16 +26,46 @@ public sealed class ModalWatchdog : IDisposable
     private volatile bool _stop;
     private long _lastDismissTick; // Environment.TickCount64, Interlocked 접근
     private long _lastVbaModalTick; // 마지막으로 VBA 모달을 관측한 시각, Interlocked 접근
+    private long _saveGuardUntil; // VBE 닫기 후속 프롬프트 가드 기한, Interlocked 접근(미룬 닫기는 호출 스레드가 연다)
+    private readonly int _deferVbeCloseMs;
+    private long _vbeCloseDue; // 미룬 VBE 닫기 기한(0 = 없음), Interlocked 접근
+    private readonly ManualResetEventSlim _vbeCloseDeferred = new(false);
 
     /// <summary>안전 버튼이 없을 때 WM_CLOSE 폴백 전에 다이얼로그를 관측해야 하는 최소 시간 —
     /// 숨은 상태로 생성 중인 다이얼로그는 버튼이 아직 없을 수 있다.</summary>
     public const int FallbackGraceMs = 1000;
 
-    public ModalWatchdog(int excelPid)
+    /// <param name="deferVbeCloseMs">0보다 크면 VBE 닫기가 필요한 해제 뒤 바로 닫지 않고 이만큼 미룬다 —
+    /// 그사이 호출 스레드가 컴파일 오류 위치(VBE 선택 영역)를 읽고 <see cref="CloseDeferredVbe"/>로 닫는다.
+    /// 닫은 뒤에는 Excel이 종료될 수 있어 읽을 수 없다(2026-10-31 실측). 기한이 지나면 워치독이 직접 닫는다.
+    /// Application.Run은 VBE가 닫혀야 반환되므로 test/run 러너는 0(즉시)을 쓴다.
+    /// 생성자 인자인 이유: 폴링 스레드가 생성자에서 시작되므로 init 속성은 경합한다.</param>
+    public ModalWatchdog(int excelPid, int deferVbeCloseMs = 0)
     {
         _pid = excelPid;
+        _deferVbeCloseMs = deferVbeCloseMs;
         _thread = new Thread(Loop) { IsBackground = true, Name = "vbaloop-modal-watchdog" };
         _thread.Start();
+    }
+
+    /// <summary>VBA 모달을 한 번이라도 관측했는가.</summary>
+    public bool SawVbaModal => Interlocked.Read(ref _lastVbaModalTick) != 0;
+
+    /// <summary>미룬 VBE 닫기가 생길 때까지(해제 완료 시점) 대기. 생겼으면 true.</summary>
+    public bool WaitForDeferredVbeClose(int timeoutMs) => _vbeCloseDeferred.Wait(timeoutMs);
+
+    /// <summary>미룬 VBE 닫기를 지금 수행(없으면 no-op). Win32만 쓰므로 아무 스레드에서나 안전.</summary>
+    public void CloseDeferredVbe()
+    {
+        if (Interlocked.Exchange(ref _vbeCloseDue, 0) != 0) CloseVbe();
+    }
+
+    private void CloseVbe()
+    {
+        ModalHunter.CloseVbeWindows(_pid);
+        // 가드 8s — 저장 프롬프트가 VBE 닫기 후 지연되어 뜨는 것을 실측(가드
+        // 경계 근처에 뜨면 놓쳐 COM 영구 차단).
+        Interlocked.Exchange(ref _saveGuardUntil, Environment.TickCount64 + 8000);
     }
 
     /// <summary>실행 중인 테스트/매크로 라벨 — 모달 이벤트 귀속용.</summary>
@@ -104,19 +134,27 @@ public sealed class ModalWatchdog : IDisposable
 
     public void Dispose()
     {
+        CloseDeferredVbe(); // 호출자가 닫지 않고 나가도 VBE를 열린 채 두지 않는다
         _stop = true;
         _thread.Join(2000);
+        _vbeCloseDeferred.Dispose();
     }
 
     private void Loop()
     {
-        long saveGuardUntil = 0; // TickCount64 기준
         var firstSeen = new Dictionary<IntPtr, long>(); // 폴백 유예용 최초 관측 시각
 
         while (!_stop)
         {
             try
             {
+                // 호출 스레드가 기한 안에 닫지 않음 — 위치 판독에 실패했어도 VBE는 닫는다
+                long due = Interlocked.Read(ref _vbeCloseDue);
+                if (due != 0 && Environment.TickCount64 >= due
+                    && Interlocked.CompareExchange(ref _vbeCloseDue, 0, due) == due)
+                    CloseVbe();
+
+                long saveGuardUntil = Interlocked.Read(ref _saveGuardUntil);
                 var dialogs = ModalHunter.FindDialogs(_pid);
                 foreach (var stale in firstSeen.Keys.Where(h => dialogs.All(d => d.Hwnd != h)).ToList())
                     firstSeen.Remove(stale);
@@ -145,13 +183,15 @@ public sealed class ModalWatchdog : IDisposable
                         Interlocked.Exchange(ref _lastDismissTick, Environment.TickCount64);
                         // VBE 닫기는 컴파일 오류(확인/OK)와 폴백에만 필요 — 런타임 오류(End)는
                         // 클릭만으로 제어 반환. 불필요한 VBE 닫기는 저장 프롬프트/XLMAIN 소멸 유발.
-                        if (r.RequiresVbeClose)
+                        if (r.RequiresVbeClose && _deferVbeCloseMs > 0)
+                        {
+                            Interlocked.CompareExchange(ref _vbeCloseDue, Environment.TickCount64 + _deferVbeCloseMs, 0);
+                            _vbeCloseDeferred.Set();
+                        }
+                        else if (r.RequiresVbeClose)
                         {
                             Thread.Sleep(150);
-                            ModalHunter.CloseVbeWindows(_pid);
-                            // 가드 8s — 저장 프롬프트가 VBE 닫기 후 지연되어 뜨는 것을 실측(가드
-                            // 경계 근처에 뜨면 놓쳐 COM 영구 차단).
-                            saveGuardUntil = Environment.TickCount64 + 8000;
+                            CloseVbe();
                         }
                     }
                     else if (dlg.Caption == "Microsoft Excel" && dlg.ClassName == "NUIDialog"

@@ -18,6 +18,9 @@ public static class DistCompileVerdict
 
     public sealed record Verdict(Kind Kind, string? Detail)
     {
+        /// <summary>CompileError일 때 VBE 선택 영역에서 읽은 위치(읽기 실패면 null). 판정에는 쓰지 않는다.</summary>
+        public CompileErrorLocation? Location { get; init; }
+
         public bool Publishable => Kind is Kind.Compiled or Kind.AlreadyCompiled or Kind.Unverified;
         public string Label => Kind switch
         {

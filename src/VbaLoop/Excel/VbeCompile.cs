@@ -34,8 +34,9 @@ public static class VbeCompile
             return DistCompileVerdict.Decide(true, false, Array.Empty<string>(), null, null, timedOut: false);
         }
 
-        using var watchdog = new ModalWatchdog(pid);
+        using var watchdog = new ModalWatchdog(pid, DeferVbeCloseMs);
         watchdog.SetLabel($"{logPrefix}:compile");
+        CompileErrorLocation? location = null;
         using var done = new ManualResetEventSlim(false);
         bool killed = false;
         var killer = new Thread(() =>
@@ -61,11 +62,17 @@ public static class VbeCompile
                 Thread.Sleep(500);
                 try { enabledAfter = ComRetry.Invoke<bool>(() => (bool)Convert.ToBoolean(ctl.Enabled)); }
                 catch (Exception ex) { log.Write("warn", $"{logPrefix}_compile_state_unreadable", new { error = ex.Message }); }
+
+                // 오류 위치: 워치독이 모달을 닫고 VBE 닫기를 미룬 사이에 선택 영역을 읽는다. 위 Enabled 읽기는
+                // 모달이 떠 있는 동안 거부-재시도되므로 여기서는 해제 직후다 — 미룬 닫기 설정까지만 잠깐 기다린다.
+                if (watchdog.SawVbaModal && watchdog.WaitForDeferredVbeClose(3000))
+                    location = ReadErrorLocation(vbe, log, logPrefix);
             }
         }
         finally
         {
             done.Set();
+            watchdog.CloseDeferredVbe(); // 읽었든 못 읽었든 이제 닫는다 — 아래 링거가 후속 저장 프롬프트를 드레인
         }
 
         var events = watchdog.Drain();
@@ -74,10 +81,40 @@ public static class VbeCompile
         var modalTexts = events.Where(e => e.Kind == "vbe_modal").Select(e => e.Body).ToList();
 
         var verdict = DistCompileVerdict.Decide(true, true, modalTexts, executeError, enabledAfter, killed);
+        if (verdict.Kind == DistCompileVerdict.Kind.CompileError) verdict = verdict with { Location = location };
         log.Write(verdict.Publishable ? "info" : "error", $"{logPrefix}_compile", new
         {
-            result = verdict.Label, detail = verdict.Detail, modals = events.Select(e => new { e.Kind, e.Body, e.Dismissal }),
+            result = verdict.Label, detail = verdict.Detail, location = verdict.Location,
+            modals = events.Select(e => new { e.Kind, e.Body, e.Dismissal }),
         });
         return verdict;
+    }
+
+    /// <summary>미룬 VBE 닫기 기한 — 호출 스레드가 이 안에 위치를 못 읽으면 워치독이 닫는다(실측 판독 ~30ms).</summary>
+    public const int DeferVbeCloseMs = 5000;
+
+    /// <summary>
+    /// 컴파일 오류 직후 VBE 선택 영역 = 오류 위치(모달 본문에는 없음). 메인 스레드의 기존 vbe 프록시로 읽는다 —
+    /// Execute는 비동기 게시라 즉시 반환되므로 이 스레드는 막혀 있지 않다(2026-10-31 실측). 실패는 null(보고만 빠짐).
+    /// </summary>
+    private static CompileErrorLocation? ReadErrorLocation(dynamic vbe, ToolLog log, string logPrefix)
+    {
+        try
+        {
+            dynamic? pane = ComRetry.Invoke<object?>(() => vbe.ActiveCodePane);
+            if (pane == null) return null;
+            int sl = 0, sc = 0, el = 0, ec = 0;
+            ComRetry.Invoke(() => { pane.GetSelection(ref sl, ref sc, ref el, ref ec); });
+            if (sl <= 0) return null;
+            dynamic cm = pane.CodeModule;
+            string module = Convert.ToString(cm.Parent.Name) ?? "";
+            string text = Convert.ToString(cm.Lines(sl, 1)) ?? "";
+            return new CompileErrorLocation(module, sl, sc, el, ec, text);
+        }
+        catch (Exception ex)
+        {
+            log.Write("warn", $"{logPrefix}_compile_location_unreadable", new { error = ex.Message });
+            return null;
+        }
     }
 }

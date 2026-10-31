@@ -135,11 +135,13 @@ public static class DistCommand
                         {
                             outPath,
                             published = false,
-                            compile = new { result = compile.Label, detail = compile.Detail },
+                            compile = new { result = compile.Label, detail = compile.Detail, location = compile.Location?.ToPayload() },
                         };
+                        // 배포본은 제외·주석 제거를 거친 사본이라 src 행으로 사상하지 않는다 — 모듈 + 코드 행 + 행 텍스트
                         o.Fail(
                             compile.Kind == DistCompileVerdict.Kind.CompileError
                                 ? $"Compile error — not published: {compile.Detail}"
+                                  + (compile.Location is { } loc ? $" — at {loc.Describe()}" : "")
                                 : $"Compile check unavailable — not published: {compile.Detail}",
                             compile.Kind == DistCompileVerdict.Kind.CompileError
                                 ? "Fix the error in src, push, then retry (if caused by references to excluded modules, check [dist] exclude/@dist)"

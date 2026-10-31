@@ -95,6 +95,12 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
    - 도구가 띄운 Excel(일회용, persistent·`session start`)에서 돈다. 모달 해제는 VBE를 닫고(Excel 종료 가능),
      타임아웃은 kill로 끊기 때문에 `attach`로 채택한 사용자 Excel에서는 생략하고 사유를 `payload.compile.detail`과
      경고 줄·hint에 남긴다. 그 세션의 컴파일 오류는 첫 run/test가 모달 본문으로 보고한다.
+   - 오류 위치: 모달 본문에는 위치가 없다. VBE는 오류 지점을 선택해 두므로(구문 오류는 행 전체, 미정의 Sub 등은
+     토큰) 워치독이 모달을 닫은 뒤 VBE 닫기를 미루고, 그사이 메인 스레드가 `ActiveCodePane.GetSelection`을 읽어
+     `payload.compile.location`과 오류 문구에 붙인다. 컴파일 명령 `Execute`는 비동기 게시라 즉시 반환되므로 메인
+     스레드가 막혀 있지 않다. VBE를 닫으면 Excel이 종료될 수 있어 닫은 뒤에는 읽을 수 없다(2026-10-31 실측).
+     코드 모듈 행은 헤더를 뺀 번호라 주입 본문과 행 텍스트를 대조해 src 파일 행으로 바꾼다. dist는 사본이라 코드
+     행만 보고한다. test/run은 `Application.Run`이 VBE 닫기 전에는 반환되지 않아 이 방식을 쓰지 못한다.
    - 유지 세션에서 게이트가 실패하면 원복하지 않고 poison한다. 모달 해제 뒤 Excel 상태를 믿을 수 없고, 저장 전이라
      다음 명령이 재기동하며 여는 디스크 정본은 push 이전 상태다. 생략하던 시절에는 컴파일 오류가 push를 통과해 다음
      run에서 세션을 죽였으므로, 저장 전에 멈추는 쪽이 잃는 것이 없다.

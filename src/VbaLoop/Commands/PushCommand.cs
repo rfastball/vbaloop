@@ -255,9 +255,10 @@ public static class PushCommand
         // 6.5. 컴파일 게이트: 저장 전에 VBE 컴파일 — 컴파일되지 않는 코드는 디스크 정본에 들어가지 않는다.
         //      모달 해제가 VBE를 닫고(Excel 종료 가능) 타임아웃이 kill로 끝나므로 도구가 띄운 Excel에서만 돈다.
         var (compile, compileSkip) = CompileGate(opts, cfg, (object)app, (object)proj, meta, log);
+        var (locationPayload, locationText) = DescribeLocation(compile?.Location, srcModules, cfg);
         object compilePayload = compile != null
-            ? new { result = compile.Label, detail = compile.Detail }
-            : new { result = "skipped", detail = compileSkip };
+            ? new { result = compile.Label, detail = compile.Detail, location = locationPayload }
+            : new { result = "skipped", detail = compileSkip, location = (object?)null };
         if (compile is { Publishable: false })
         {
             // 유지 세션은 원복하지 않고 poison — 모달 해제의 VBE 닫기 뒤 Excel 상태를 믿을 수 없다(종료됐을 수도).
@@ -268,6 +269,7 @@ public static class PushCommand
             bool compileError = compile.Kind == DistCompileVerdict.Kind.CompileError;
             o.Fail(
                 (compileError ? $"compile error — not saved: {compile.Detail}" : $"compile verification unavailable — not saved: {compile.Detail}")
+                + (locationText != null ? $" — at {locationText}" : "")
                 + (ephemeral
                     ? " (ephemeral Excel discarded without saving; canonical workbook on disk is in its pre-push state)"
                     : " (session Excel poisoned — the next command restarts it from the canonical workbook on disk, which is in its pre-push state)"),
@@ -359,6 +361,17 @@ public static class PushCommand
             return (null, skip);
         }
         return (VbeCompile.Run(app, proj, meta.Pid, log, "push"), null);
+    }
+
+    /// <summary>컴파일 오류 위치를 src 파일 행으로 사상해 payload와 한 줄 설명으로. 위치가 없으면 (null, null).</summary>
+    private static (object? Payload, string? Text) DescribeLocation(
+        CompileErrorLocation? loc, List<SrcModule> srcModules, ProjectConfig cfg)
+    {
+        if (loc == null) return (null, null);
+        var sm = srcModules.FirstOrDefault(m => m.Name.Equals(loc.Module, StringComparison.OrdinalIgnoreCase));
+        string? file = sm != null ? Path.GetRelativePath(cfg.RootDir, sm.FilePath) : null;
+        int? line = sm != null ? loc.MapToFileLine(sm.Header.Count, sm.Body) : null;
+        return (loc.ToPayload(file, line), loc.Describe(file, line));
     }
 
     // ---- 실패 복구: 건드린 모듈 전부 원복, 아니면 poison (PushRecovery) ----
