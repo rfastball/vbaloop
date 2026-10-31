@@ -94,7 +94,7 @@ public static class RunCommand
         if (result != "ok")
             o.Fail($"run {macro} failed" + (detail != null ? $": {detail}" : "")
                    + (sup.SessionDiedAfterModal ? $" (session ended, {sup.RestartNote})" : ""),
-                sup.SessionDiedAfterModal ? sup.SessionHint : null);
+                sup.SessionDiedAfterModal ? sup.CompileErrorHint : null);
         return o;
     }
 }

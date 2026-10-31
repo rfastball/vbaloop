@@ -25,6 +25,11 @@ internal static class RunnerSupervisor
         public string SessionHint => Marker != null ? RecoveryGate.HintFor(Marker)
             : Ephemeral ? "rerun the same command (ephemeral Excel starts fresh for each command)" : "session start";
 
+        /// <summary>컴파일 오류 모달로 세션이 죽은 뒤의 hint — 세션 문제가 아니라 src 문제임을 먼저 말한다
+        /// (세션 재기동만 하고 같은 코드로 재실행하는 루프 방지).</summary>
+        public string CompileErrorHint => "the project does not compile (the modal text is the error; it names no location, "
+            + "so start with the modules you just changed) — fix src, push, then " + SessionHint;
+
         /// <summary>세션 사망 뒤 할 일을 사람용 문장 꼬리로.</summary>
         public string RestartNote => Ephemeral ? "rerunning proceeds with a new ephemeral Excel" : "session start required";
 

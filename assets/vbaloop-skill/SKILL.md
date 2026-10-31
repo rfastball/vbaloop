@@ -152,15 +152,16 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 
 ### push compile gate
 
-- In ephemeral mode, push runs a VBE compile after injection and before saving. On a compile error it **does not save** and exits 2 with
+- push runs a VBE compile after injection and before saving (ephemeral and persistent mode alike). On a compile error it **does not save** and exits 2 with
   `payload.compile = {result: "compile_error", detail: <modal text>}`. The canonical workbook on disk is in its pre-push state
+  (a persistent session is poisoned and restarted from it by the next command)
 - Fix the cause from detail (e.g. "Variable not defined", in Excel's UI language) and push again. The modal does not give the error
   location, so start with the modules you just changed. Also check `references\vba-pitfalls.md`
 - If you are blocked by a pre-existing compile error unrelated to your change (legacy workbook), **after the user confirms** use `push --skip-compile`;
   to turn it off permanently the user sets `[push] compile = false` - do not turn the gate off yourself to get around it
 - `result: "check_failed"` (could not verify) is an environment problem - `doctor --json`, then retry
-- In a persistent session (persistent mode, session start/attach) the gate is skipped (`result: "skipped"` + reason).
-  There, compile errors show up as test fail detail (modal text)
+- In an attached user Excel (session attach) the gate is skipped (`result: "skipped"` + reason, plus a warning line and hint).
+  There, compile errors show up in the first run/test fail detail (modal text) - treat that as a push problem: fix src, push again
 
 ### Workbook state after a failed push
 

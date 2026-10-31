@@ -7,8 +7,8 @@ namespace VbaLoop.Excel;
 /// VBE 컴파일 검증(설계 §9.8, push 컴파일 게이트 §4): 프로젝트를 ActiveVBProject로 잡고
 /// "VBAProject 컴파일"(Id 578)을 Execute. 컴파일 오류는 VBE 모달로만 드러나므로 ModalWatchdog(test
 /// 러너와 같은 해제 시퀀스)이 잡아 본문을 수집하고 닫는다. 모달 해제가 실패해 Execute가 영영 안
-/// 돌아오는 경우는 타임아웃 kill로 끊는다 — 그래서 호출자는 도구가 띄운 일회용 인스턴스(dist 임시
-/// Excel, push 일회용 세션)에서만 부른다. 판정은 순수 DistCompileVerdict가 한다.
+/// 돌아오는 경우는 타임아웃 kill로 끊는다 — 그래서 호출자는 도구가 띄운 인스턴스(dist 임시 Excel,
+/// push의 일회용·유지 세션)에서만 부르고, 사용자 Excel(attach)에는 부르지 않는다. 판정은 순수 DistCompileVerdict가 한다.
 /// </summary>
 public static class VbeCompile
 {

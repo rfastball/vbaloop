@@ -99,12 +99,12 @@ public static class TestCommand
             o.Fail($"{fail} test failure(s) (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
                    + ") — see payload.tests for failure records"
                    + (sessionDied ? $" (session ended, {sup.RestartNote})" : ""),
-                sessionDied ? sup.SessionHint : null);
+                sessionDied ? sup.CompileErrorHint : null);
         else if (skipped > 0)
             o.Fail($"{skipped} test(s) not run because the session ended (pass {pass}) — {sup.RestartNote}, rerun required",
-                sup.SessionHint);
+                sup.CompileErrorHint);
         else if (sessionDied)
-            o.Hint = sup.SessionHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우
+            o.Hint = sup.CompileErrorHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우
         return o;
     }
 

@@ -253,18 +253,24 @@ public static class PushCommand
         }
 
         // 6.5. 컴파일 게이트: 저장 전에 VBE 컴파일 — 컴파일되지 않는 코드는 디스크 정본에 들어가지 않는다.
-        //      모달 해제가 VBE를 닫고(Excel 종료 가능) 타임아웃이 kill로 끝나므로 일회용 인스턴스에서만 돈다.
-        var (compile, compileSkip) = CompileGate(opts, cfg, (object)app, (object)proj, meta, ephemeral, log);
+        //      모달 해제가 VBE를 닫고(Excel 종료 가능) 타임아웃이 kill로 끝나므로 도구가 띄운 Excel에서만 돈다.
+        var (compile, compileSkip) = CompileGate(opts, cfg, (object)app, (object)proj, meta, log);
         object compilePayload = compile != null
             ? new { result = compile.Label, detail = compile.Detail }
             : new { result = "skipped", detail = compileSkip };
         if (compile is { Publishable: false })
         {
+            // 유지 세션은 원복하지 않고 poison — 모달 해제의 VBE 닫기 뒤 Excel 상태를 믿을 수 없다(종료됐을 수도).
+            // 저장 전이므로 다음 명령이 재기동하며 여는 디스크 정본은 push 이전 상태다.
+            if (!ephemeral && !meta.Poisoned)
+                meta.MarkPoisoned($"push compile gate failed ({compile.Label}) — injected code was not saved", null);
             o.Payload = BuildPayload(results, fingerprint, saved: false, backupId, compile: compilePayload);
             bool compileError = compile.Kind == DistCompileVerdict.Kind.CompileError;
             o.Fail(
                 (compileError ? $"compile error — not saved: {compile.Detail}" : $"compile verification unavailable — not saved: {compile.Detail}")
-                + " (ephemeral Excel discarded without saving; canonical workbook on disk is in its pre-push state)",
+                + (ephemeral
+                    ? " (ephemeral Excel discarded without saving; canonical workbook on disk is in its pre-push state)"
+                    : " (session Excel poisoned — the next command restarts it from the canonical workbook on disk, which is in its pre-push state)"),
                 compileError
                     ? "fix the error in src, then retry push. If it is a pre-existing error unrelated to this change, run push --skip-compile after the user confirms"
                     : "check AccessVBOM and VBE state with vbaloop doctor, then retry. Save without verification (push --skip-compile) only after the user confirms");
@@ -273,6 +279,8 @@ public static class PushCommand
         }
         if (compile?.Kind == DistCompileVerdict.Kind.Unverified)
             o.HumanLines.Add($"warning: compile verification incomplete — {compile.Detail}");
+        if (compile == null)
+            o.HumanLines.Add($"warning: compile not verified ({compileSkip}) — the first run/test reports any compile error");
 
         // 7. 종결: 무결성 통과 직후 save — 저장 없이 성공을 보고하지 않는다(poison-kill 유실 방지)
         app.DisplayAlerts = false;
@@ -313,6 +321,9 @@ public static class PushCommand
         o.HumanLines.Add($"push done (saved): {string.Join(", ", summary)}"
                          + (compile != null ? $", compile {compile.Label}" : ""));
         o.Payload = BuildPayload(results, fingerprint, saved: true, backupId, compile: compilePayload);
+        // 사용자가 끈 것이 아닌 생략(attach)은 성공처럼 읽히기 쉽다 — run/test 실패를 push 문제로 되짚게 hint로 노출
+        if (compile == null && meta.IsExternal)
+            o.Hint = "compile was not verified in the attached Excel — if the next run/test fails with a compile error modal, fix src and push again";
         return o;
     }
 
@@ -331,15 +342,16 @@ public static class PushCommand
 
     /// <summary>
     /// 저장 전 VBE 컴파일. 반환: (판정, 생략 사유). 생략은 --skip-compile, [push] compile = false, 그리고
-    /// 유지되는 세션 Excel(persistent 모드, session start/attach) — 모달 해제의 VBE 닫기와 타임아웃 kill을
-    /// 사용자가 보는 Excel에 가하지 않기 위해서다. 그 세션들의 컴파일 오류는 test가 모달 본문으로 보고한다.
+    /// session attach로 채택한 사용자 Excel — 모달 해제의 VBE 닫기와 타임아웃 kill을 사용자 Excel에 가하지
+    /// 않기 위해서다. 도구가 띄운 유지 세션(persistent, session start)은 돈다: 컴파일 오류면 어차피 다음
+    /// run/test의 모달 해제로 세션이 죽으므로, 저장 전에 멈추는 쪽이 잃는 것이 없다(2026-10-31 버그리포트).
     /// </summary>
     private static (DistCompileVerdict.Verdict? Verdict, string? SkipReason) CompileGate(
-        CliArgs opts, ProjectConfig cfg, object app, object proj, SessionMeta meta, bool ephemeral, ToolLog log)
+        CliArgs opts, ProjectConfig cfg, object app, object proj, SessionMeta meta, ToolLog log)
     {
         string? skip = opts.SkipCompile ? "--skip-compile"
             : !cfg.PushCompile ? "[push] compile = false"
-            : !ephemeral ? "compile gate is not run in a persistent session Excel (persistent mode, session start/attach) — test reports compile errors"
+            : meta.IsExternal ? "compile gate is not run in an attached user Excel (session attach)"
             : null;
         if (skip != null)
         {
