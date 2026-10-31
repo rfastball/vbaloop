@@ -7,7 +7,8 @@ namespace VbaLoop.Core;
 /// 판정 원칙: 컴파일 오류는 VBE 모달(#32770 "Microsoft Visual Basic ...")로만 드러나므로 모달이 곧 오류다.
 /// Enabled=false는 "컴파일할 것 없음(이미 컴파일됨)". 관측 불능(컨트롤 없음/Execute 예외/타임아웃)은
 /// 게시하지 않는다(fail closed — 탈출구는 --skip-compile). 모달 없이 끝났는데 Enabled가 그대로면
-/// 오류 신호는 없으므로 게시하되 경고한다(숨은 VBE에서 상태 갱신이 늦는 경우 대비).
+/// 오류 신호는 없으므로 게시하되 경고한다. 관측자(VbeCompile)는 결론이 날 때까지 폴링하므로 이 경우는
+/// 대기 상한(60s)을 넘긴 것뿐이다 — 예전 단발 판독에서는 컴파일 전 상태를 읽은 오류 코드가 여기로 샜다.
 /// </summary>
 public static class DistCompileVerdict
 {

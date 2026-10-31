@@ -95,6 +95,10 @@ CLI. src 텍스트 파일과 워크북 VBProject를 손상 없이 왕복시키�
    - 도구가 띄운 Excel(일회용, persistent·`session start`)에서 돈다. 모달 해제는 VBE를 닫고(Excel 종료 가능),
      타임아웃은 kill로 끊기 때문에 `attach`로 채택한 사용자 Excel에서는 생략하고 사유를 `payload.compile.detail`과
      경고 줄·hint에 남긴다. 그 세션의 컴파일 오류는 첫 run/test가 모달 본문으로 보고한다.
+   - 판정은 결론이 날 때까지 폴링한다(250ms 간격, 상한 60s): VBA 모달을 보면 오류, 컴파일 컨트롤 Enabled가
+     false가 되면 컴파일됨. `Execute`가 즉시 반환되므로, 예전처럼 500ms 뒤에 한 번만 읽으면 컴파일 전 상태를 읽고
+     오류 코드를 unverified로 통과시켜 저장했다(BizLookup 2026-10-30~31, 재현 4회 중 3회). 상한을 넘긴 경우만
+     unverified로 남는다.
    - 오류 위치: 모달 본문에는 위치가 없다. VBE는 오류 지점을 선택해 두므로(구문 오류는 행 전체, 미정의 Sub 등은
      토큰) 워치독이 모달을 닫은 뒤 VBE 닫기를 미루고, 그사이 메인 스레드가 `ActiveCodePane.GetSelection`을 읽어
      `payload.compile.location`과 오류 문구에 붙인다. 컴파일 명령 `Execute`는 비동기 게시라 즉시 반환되므로 메인

@@ -57,14 +57,42 @@ public static class VbeCompile
             catch (Exception ex) { executeError = ex.Message; }
             if (!killed)
             {
-                // Execute가 명령을 비동기로 게시하는 경우 대비: 모달이 뜰 여지를 잠깐 주고 상태를 다시 읽는다.
-                // 모달이 떠 있으면 이 호출은 거부→재시도되는 동안 워치독이 모달을 닫는다.
-                Thread.Sleep(500);
-                try { enabledAfter = ComRetry.Invoke<bool>(() => (bool)Convert.ToBoolean(ctl.Enabled)); }
-                catch (Exception ex) { log.Write("warn", $"{logPrefix}_compile_state_unreadable", new { error = ex.Message }); }
+                // Execute는 명령을 게시만 하고 즉시 반환한다(2026-10-31 실측) — 컴파일은 그 뒤 Excel 메시지 루프에서
+                // 돈다. 그래서 결론이 날 때까지 폴링한다: VBA 모달 관측 = 오류, Enabled=false = 컴파일됨. 예전의
+                // 500ms 뒤 단발 판독은 컴파일 전 상태(Enabled=true, 모달 없음)를 읽어 오류 코드를 unverified로
+                // 통과·저장시켰다(BizLookup 로그 5건 중 3건이 다음 test에서 컴파일 모달로 사망, 재현 4회 중 3회).
+                // 모달이 떠 있는 동안 Enabled 읽기는 거부되므로 예외는 삼키고 다음 폴의 모달 관측으로 끝난다.
+                var settle = Stopwatch.StartNew();
+                int polls = 0;
+                string? lastStateError = null;
+                while (!killed && settle.ElapsedMilliseconds < SettleTimeoutMs)
+                {
+                    Thread.Sleep(SettlePollMs);
+                    polls++;
+                    if (watchdog.SawVbaModal) break;
+                    try
+                    {
+                        enabledAfter = ComRetry.Invoke<bool>(() => (bool)Convert.ToBoolean(ctl.Enabled), retries: 1);
+                    }
+                    catch (Exception ex)
+                    {
+                        enabledAfter = null;
+                        lastStateError = ex.Message;
+                        continue;
+                    }
+                    if (enabledAfter == false)
+                    {
+                        Thread.Sleep(SettleQuietMs); // false가 컴파일 도중의 일시 상태일 경우 대비 — 늦은 모달은 Decide가 우선한다
+                        break;
+                    }
+                }
+                log.Write("info", $"{logPrefix}_compile_settled", new
+                {
+                    ms = settle.ElapsedMilliseconds, polls, sawModal = watchdog.SawVbaModal, enabledAfter, lastStateError,
+                });
 
-                // 오류 위치: 워치독이 모달을 닫고 VBE 닫기를 미룬 사이에 선택 영역을 읽는다. 위 Enabled 읽기는
-                // 모달이 떠 있는 동안 거부-재시도되므로 여기서는 해제 직후다 — 미룬 닫기 설정까지만 잠깐 기다린다.
+                // 오류 위치: 워치독이 모달을 닫고 VBE 닫기를 미룬 사이에 선택 영역을 읽는다. 모달 관측 직후일 수
+                // 있으므로 해제 완료(미룬 닫기 설정)까지 잠깐 기다린다.
                 if (watchdog.SawVbaModal && watchdog.WaitForDeferredVbeClose(3000))
                     location = ReadErrorLocation(vbe, log, logPrefix);
             }
@@ -89,6 +117,12 @@ public static class VbeCompile
         });
         return verdict;
     }
+
+    /// <summary>Execute 뒤 결론(모달 또는 Enabled=false) 대기 상한 — 넘기면 unverified. 타임아웃 kill(TimeoutSec)보다 짧아야 한다.</summary>
+    public const int SettleTimeoutMs = 60_000;
+    public const int SettlePollMs = 250;
+    /// <summary>Enabled=false 관측 뒤 늦은 모달을 기다리는 여유.</summary>
+    public const int SettleQuietMs = 500;
 
     /// <summary>미룬 VBE 닫기 기한 — 호출 스레드가 이 안에 위치를 못 읽으면 워치독이 닫는다(실측 판독 ~30ms).</summary>
     public const int DeferVbeCloseMs = 5000;
