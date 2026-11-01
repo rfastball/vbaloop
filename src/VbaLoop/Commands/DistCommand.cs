@@ -48,7 +48,8 @@ public static class DistCommand
         if (dangling.Count > 0)
         {
             log.Write("error", "dist_dangling_refs", new { count = dangling.Count });
-            o.Payload = new { danglingRefs = dangling.Take(20).Select(d => new { d.InModule, d.Line, d.Symbol, d.Kind }) };
+            // 전체를 싣는다 — 잘라 보내면 고친 뒤 재실행해야 다음 건이 드러난다(이슈 #4)
+            o.Payload = new { danglingRefCount = dangling.Count, danglingRefs = dangling.Select(d => new { d.InModule, d.Line, d.Symbol, d.Kind }) };
             o.Fail(
                 $"Compile safety failure: remaining modules reference symbols of excluded modules — " +
                 string.Join(", ", dangling.Take(5).Select(d => $"{d.InModule}:{d.Line} {d.Symbol}({d.Kind})")) +

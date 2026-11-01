@@ -28,7 +28,7 @@ is not touched (no lease needed). dist does not change the workbook, so it is no
   vbaloop update** - when the new exe's `init` re-vendors `src\LogShim.bas` etc., the src fingerprint no longer matches.
   Keep the order **update -> init -> push -> dist** (init is filesystem-only, so it cannot push).
 - **dangling refs (compile-safety failure)**: a remaining module references a symbol of an excluded module. Look at the
-  `module:line` entries in payload.danglingRefs and narrow the exclusion or remove the reference (Test modules are only safe to drop wholesale if they reference only each other).
+  `module:line` entries in payload.danglingRefs (all hits; total in payload.danglingRefCount) and narrow the exclusion or remove the reference (Test modules are only safe to drop wholesale if they reference only each other).
 - **LogShim IS_RELEASE missing (CliError)**: violates the distribution sanitizing contract - it fails loudly to prevent a distribution copy
   that silently has logging on. `src\LogShim.bas` has drifted from the managed copy, so restore the canonical copy with
   `vbaloop init` (if it still reproduces, it is a vbaloop defect - `vbaloop bugreport`).
