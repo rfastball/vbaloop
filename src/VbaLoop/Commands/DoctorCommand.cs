@@ -24,6 +24,12 @@ public static class DoctorCommand
             .Any(p => string.Equals(p.Trim().TrimEnd('\\'), target, StringComparison.OrdinalIgnoreCase));
     }
 
+    public static string DescribeOrphans(int count, int killable, bool killOrphans)
+        => count == 0
+            ? "no windowless orphan EXCEL processes"
+            : $"{count} windowless EXCEL processes ({killable} to clean up: in the current Windows session, excluding the current project's live session, /automation, not quarantined)"
+              + (killOrphans || killable == 0 ? "" : " — clean up only after the user confirms: vbaloop doctor --kill-orphans");
+
     public static Outcome Run(CliArgs opts)
     {
         var o = new Outcome { Command = "doctor" };
@@ -147,10 +153,7 @@ public static class DoctorCommand
         var orphans = ScanOrphanExcel(opts, meta, marker, ephemeralPids);
         int killable = orphans.Count(z => z.Killable);
         checks.Add(new Check("excel.orphans", true,
-            orphans.Count == 0
-                ? "no windowless orphan EXCEL processes"
-                : $"{orphans.Count} windowless EXCEL processes ({killable} to clean up: not current session, /automation, not quarantined)"
-                  + (opts.KillOrphans || killable == 0 ? "" : " — clean up only after the user confirms: vbaloop doctor --kill-orphans")));
+            DescribeOrphans(orphans.Count, killable, opts.KillOrphans)));
         foreach (var z in orphans)
             checks.Add(new Check($"excel.orphans.{z.Pid}", true,
                 $"PID {z.Pid} (started {z.StartTime ?? "unknown"}) {z.Action} — {z.Reason}"));
