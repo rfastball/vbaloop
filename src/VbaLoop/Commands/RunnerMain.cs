@@ -49,6 +49,8 @@ public static class RunnerMain
             // 워치독 이벤트는 stdout/jsonl에 직접 쓰지 않고 큐로만 전달(프로토콜 보호).
             using var watchdog = new ModalWatchdog(meta.Pid);
             var watchdogEvents = new List<object>();
+            // Excel 프로세스 소멸(크래시) 판정용 — 핸들을 실행 전에 쥐어야 소멸 뒤에도 종료 코드를 읽는다
+            using var exitWatch = ExcelExitWatch.Open(meta.Pid, meta.ExcelStartTime);
 
             dynamic wb = SessionService.FindWorkbook(app, meta.WorkbookFullName);
             dynamic proj = SessionService.GetVbProject(wb);
@@ -61,7 +63,7 @@ public static class RunnerMain
 
             // --macro: 테스트 열거 대신 단건 매크로 실행 (run 명령의 자식 모드)
             if (opts.Macro != null)
-                return RunMacro(opts.Macro, runId, cfg, app, meta, watchdog, watchdogEvents, wbName, jsonlPath);
+                return RunMacro(opts.Macro, runId, cfg, app, meta, watchdog, exitWatch, watchdogEvents, wbName, jsonlPath);
 
             var testList = new List<(string Module, string Sub)>();
             List<VbaProjectOps.ComponentInfo> comps = VbaProjectOps.ListComponents(proj);
@@ -80,6 +82,7 @@ public static class RunnerMain
             // 이전 테스트 drain에 소비된 경우에도 유효해야 함)
             bool vbeCloseHappened = false;
             bool sessionDied = false;
+            ExcelExitKind excelExit = ExcelExitKind.Alive; // 프로세스 소멸(크래시/종료) — 모달 사망과 구분
             int next = 0; // 다음 미처리 테스트 인덱스 (사망 중단 시 잔여 skipped 채우기용)
 
             for (; next < testList.Count && !sessionDied; next++)
@@ -90,11 +93,19 @@ public static class RunnerMain
                 long offset = File.Exists(jsonlPath) ? new FileInfo(jsonlPath).Length : 0;
 
                 string? error = null;
+                Exception? caught = null;
                 watchdog.SetLabel(full);
                 try
                 {
                     // 항상 모듈 한정 호출 — 비한정 호출은 동명 프로시저 존재 시 1004 모호
                     ComRetry.Invoke(() => { app.Run($"'{wbName}'!{full}"); });
+                }
+                catch (COMException ex) when (ComRetry.IsPoison(ex.HResult)
+                                              && !vbeCloseHappened && exitWatch.ClassifyAfter(ex) != ExcelExitKind.Alive)
+                {
+                    // 프로세스가 사라졌다 — poison이 아니라 크래시/종료이고 이 테스트가 진짜 신호(아래 판정에서 fail)
+                    error = ex.Message;
+                    caught = ex;
                 }
                 catch (COMException ex) when (ComRetry.IsPoison(ex.HResult))
                 {
@@ -130,6 +141,7 @@ public static class RunnerMain
                 catch (Exception ex)
                 {
                     error = ex.Message; // VBA 런타임 에러 → 해당 테스트 fail
+                    caught = ex;
                 }
                 finally
                 {
@@ -149,17 +161,29 @@ public static class RunnerMain
                 // 세션 사망 probe — 트리거 A: VBE 닫기 해제 발생(라벨 무관, Excel 종료가 지연되므로
                 // 안정화 폴링). 트리거 B: non-poison 예외 발생(오탐 1004 가능성, 즉시 1회).
                 // result 확정 전에 판정하므로 사후 재분류가 필요 없다.
-                bool deadNow = false;
-                if (vbeCloseInDrain)
+                // 트리거 D: Excel 프로세스 자체가 사라짐(크래시·Quit). 크래시 의심 오류만 소멸을 기다리고 나머지는
+                // 즉시 확인한다. 모달 사망(VBE 닫기)은 트리거 A 소관 — 정상 종료라 Quit으로 오인하지 않도록 제외.
+                string? crashDetail = null;
+                if (!vbeCloseInDrain)
+                {
+                    var kind = caught != null ? exitWatch.ClassifyAfter(caught) : exitWatch.Classify(0);
+                    if (kind != ExcelExitKind.Alive)
+                    {
+                        excelExit = kind;
+                        crashDetail = ExitDetail(kind, full, exitWatch);
+                    }
+                }
+                bool deadNow = crashDetail != null;
+                if (!deadNow && vbeCloseInDrain)
                     deadNow = ProbeDeathStabilized(app, meta.WorkbookFullName);
-                else if (error != null)
+                else if (!deadNow && error != null)
                     deadNow = !SessionService.IsWorkbookAlive(app, meta.WorkbookFullName);
 
                 var failedAsserts = ReadFailedAsserts(jsonlPath, offset);
                 string? modalDetail = myModals.Count > 0
                     ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
                     : null;
-                var (result, detail) = RunnerVerdict.Decide(error, failedAsserts, modalDetail, deadNow);
+                var (result, detail) = RunnerVerdict.Decide(error, failedAsserts, modalDetail, deadNow, crashDetail);
                 if (result == RunnerVerdict.Pass) pass++;
                 else if (result == RunnerVerdict.Fail) fail++;
                 else skipped++;
@@ -203,6 +227,8 @@ public static class RunnerMain
                 ok = true,
                 poison = false,
                 sessionDied,
+                excelExit = ExitName(excelExit),
+                excelExitCode = excelExit != ExcelExitKind.Alive ? exitWatch.ExitCode : null,
                 error = (string?)null,
                 hint = (string?)null,
                 tests,
@@ -237,7 +263,7 @@ public static class RunnerMain
     /// 어서션 실패는 run의 성패를 가르지 않고 정보로만 노출(테스트가 아니므로).</summary>
     private static int RunMacro(
         string macroSpec, string runId, ProjectConfig cfg, dynamic app, SessionMeta meta,
-        ModalWatchdog watchdog, List<object> watchdogEvents, string wbName, string jsonlPath)
+        ModalWatchdog watchdog, ExcelExitWatch exitWatch, List<object> watchdogEvents, string wbName, string jsonlPath)
     {
         if (!MacroName.TryParse(macroSpec, out var module, out var proc, out var nameError))
             throw new CliError(nameError!, "Format: vbaloop run Module.Proc");
@@ -247,6 +273,7 @@ public static class RunnerMain
         long offset = File.Exists(jsonlPath) ? new FileInfo(jsonlPath).Length : 0;
 
         string? error = null;
+        Exception? caught = null;
         object? rawReturn = null;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         watchdog.SetLabel(full);
@@ -254,6 +281,12 @@ public static class RunnerMain
         {
             // 항상 모듈 한정 호출
             rawReturn = ComRetry.Invoke<object?>(() => app.Run($"'{wbName}'!{full}"));
+        }
+        catch (COMException ex) when (ComRetry.IsPoison(ex.HResult) && exitWatch.ClassifyAfter(ex) != ExcelExitKind.Alive)
+        {
+            // 프로세스가 사라졌다 — poison이 아니라 크래시/종료(아래에서 sessionDied로 보고)
+            error = ex.Message;
+            caught = ex;
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult))
         {
@@ -272,6 +305,7 @@ public static class RunnerMain
         catch (Exception ex)
         {
             error = ex.Message;
+            caught = ex;
         }
         finally
         {
@@ -286,14 +320,22 @@ public static class RunnerMain
         bool vbeCloseHappened = drained.Any(
             e => e.Kind == "vbe_modal" && ModalHunter.RequiresVbeClose(e.Dismissal));
 
+        // Excel 프로세스 자체가 사라졌는지(크래시·Quit) — 모달 사망(VBE 닫기)은 아래 안정화 probe 소관
+        var excelExit = vbeCloseHappened ? ExcelExitKind.Alive
+            : caught != null ? exitWatch.ClassifyAfter(caught) : exitWatch.Classify(0);
+        string? crashDetail = ExitDetail(excelExit, full, exitWatch);
+
         var (records, failedAsserts) = ReadSpan(jsonlPath, offset);
         bool modalHit = myModals.Count > 0;
-        string result = error == null && !modalHit ? "ok" : "fail";
+        string result = error == null && !modalHit && crashDetail == null ? "ok" : "fail";
         AppendMarker(jsonlPath, "run_end", full, runId, result);
 
-        string? detail = modalHit
+        string? modalDetail = modalHit
             ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
-              + (error != null ? $" | COM: {error}" : "")
+            : null;
+        string? detail = crashDetail != null
+            ? crashDetail + (modalDetail != null ? $" | {modalDetail}" : "") + (error != null ? $" | COM: {error}" : "")
+            : modalDetail != null ? modalDetail + (error != null ? $" | COM: {error}" : "")
             : error != null ? $"runtime error: {error}" : null;
 
         var (returnValue, returnType) = SerializeReturn(rawReturn);
@@ -307,13 +349,16 @@ public static class RunnerMain
         }
 
         // test 모드와 대칭: VBE 닫기 해제가 있었으면 안정화 probe로 사망을 self-report
-        bool sessionDied = vbeCloseHappened && ProbeDeathStabilized(app, meta.WorkbookFullName);
+        bool sessionDied = excelExit != ExcelExitKind.Alive
+                           || (vbeCloseHappened && ProbeDeathStabilized(app, meta.WorkbookFullName));
 
         PrintResult(new
         {
             ok = result == "ok",
             poison = false,
             sessionDied,
+            excelExit = ExitName(excelExit),
+            excelExitCode = excelExit != ExcelExitKind.Alive ? exitWatch.ExitCode : null,
             error = result == "ok" ? null : detail,
             hint = (string?)null,
             run = new
@@ -334,6 +379,22 @@ public static class RunnerMain
         });
         return 0;
     }
+
+    /// <summary>프로세스 소멸 종류별 실패 detail. 살아 있으면 null.</summary>
+    private static string? ExitDetail(ExcelExitKind kind, string full, ExcelExitWatch w) => kind switch
+    {
+        ExcelExitKind.Crashed => ExcelCrash.Detail(full, w.Pid, w.ExitCode),
+        ExcelExitKind.Exited => ExcelCrash.ExitedDetail(full, w.Pid),
+        _ => null,
+    };
+
+    /// <summary>러너 JSON의 excelExit 값(supervisor가 읽는다). 살아 있으면 null.</summary>
+    private static string? ExitName(ExcelExitKind kind) => kind switch
+    {
+        ExcelExitKind.Crashed => "crashed",
+        ExcelExitKind.Exited => "exited",
+        _ => null,
+    };
 
     /// <summary>Application.Run 반환값 직렬화 — 원시 타입만. COM 객체는 러너가 GC 정리
     /// 경로 밖이므로 즉시 해제하고 타입명만 보고(검토 지적: RCW 방치 금지).</summary>

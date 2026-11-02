@@ -130,6 +130,15 @@ pull은 `--force`를 요구한다.
 - 어서션 싱크는 프로젝트에 벤더링한 self-contained `LogShim.bas`다. `Debug.Assert`는 헤드리스에서 아무 신호도
   내지 않는다.
 - VBE 오류 대화상자는 러너의 워치독이 자동으로 닫는다(§8). 세션이 죽으면 남은 테스트는 skipped로 즉시 반환한다.
+- Excel 프로세스 자체의 소멸(크래시)도 세션 사망이다. 러너와 부모가 실행 전에 Excel 프로세스 핸들을 쥐고, 호출이
+  크래시 의심 오류(DISP_E_EXCEPTION·RPC 단절)로 끝나면 최대 5초 소멸을 기다린다(일반 VBA 오류 0x800A9C68은 즉시
+  확인만). 실측(2026-11-02): 액세스 위반은 6ms 만에 DISP_E_EXCEPTION으로 돌아오고 프로세스는 1초 안에 사라지며
+  종료 코드는 0이다 — 그래서 종료 코드가 아니라 크래시 의심 오류·0 아닌 종료 코드·재기동 Excel 중 하나로 크래시를
+  판정한다(징후가 없으면 "exited"). 그 테스트는 skipped가 아니라 fail(`Excel crashed while running ...`),
+  `sessionDied: true`, `payload.excelCrash`, 로그 `excel_crashed`. push/pull/diff의 COM 실패도 같은 판정을 거쳐
+  poison 대신 크래시로 보고한다(실측 크래시는 push의 폼 임포트 직후).
+- Office 크래시 핸들러는 크래시한 Excel을 부모로 하는 새 Excel을 보이는 창으로 띄워 정본과 복구 사본을 다시 열기도
+  한다(그 사이 push는 read-only로 거부). 이 Excel은 사용자에게 보이는 복구 상태라 kill하지 않고 PID만 보고한다(§11).
 - `run <Module.Proc>`: 같은 러너로 단일 매크로를 실행하고 반환값을 보고한다.
 
 ### init

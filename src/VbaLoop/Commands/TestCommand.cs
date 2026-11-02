@@ -45,9 +45,17 @@ public static class TestCommand
         if (sup.ExitCode == 3) // poison — 러너가 메타파일에 이미 기록함
         {
             log.Write("error", "runner_poisoned", new { runId });
-            o.Payload = sup.Root != null ? BuildPayload(sup.Root.Value, sessionDied: false) : null;
+            o.Payload = sup.Root != null ? BuildPayload(sup.Root.Value, sessionDied: false, crash: null) : null;
             o.Fail((sup.Error ?? "fatal COM error in child runner") + $" — {sup.RecoveryTail}",
                 sup.SessionHint, environment: true);
+            return o;
+        }
+        if ((sup.ExitCode != 0 || sup.Root == null) && sup.Crash != null)
+        {
+            // 러너가 결과를 못 낸 채 Excel이 사라졌다 — 러너 오류보다 크래시가 먼저다
+            o.Fail(sup.CrashDetail("test")! + $" (session ended, {sup.RestartNote})", sup.DeathHint);
+            if (sup.RelaunchWarning != null) o.HumanLines.Add(sup.RelaunchWarning);
+            o.Payload = new { sessionDied = true, excelCrash = sup.Crash };
             return o;
         }
         if (sup.ExitCode != 0 || sup.Root == null)
@@ -65,7 +73,7 @@ public static class TestCommand
         int fail = summaryEl.GetProperty("fail").GetInt32();
         int skipped = summaryEl.TryGetProperty("skipped", out var sk) ? sk.GetInt32() : 0;
         bool sessionDied = sup.SessionDiedAfterModal; // 러너 self-report + supervisor 백스톱 결합
-        o.Payload = BuildPayload(root, sessionDied);
+        o.Payload = BuildPayload(root, sessionDied, sup.Crash);
 
         o.HumanLines.Add($"test: pass {pass}, fail {fail}" + (skipped > 0 ? $", skipped {skipped}" : ""));
         if (root.TryGetProperty("watchdog", out var wdArr) && wdArr.ValueKind == JsonValueKind.Array)
@@ -90,30 +98,38 @@ public static class TestCommand
             o.HumanLines.Add($"  SKIP {skipped} — not run because the session ended");
 
         if (sessionDied)
-            o.HumanLines.Add($"Warning: Excel session ended after dismissing a compile error modal — {sup.RestartNote}");
+            o.HumanLines.Add(sup.DeathWarning);
+        if (sup.RelaunchWarning != null)
+            o.HumanLines.Add(sup.RelaunchWarning);
         if (sup.Marker != null)
             o.HumanLines.Add($"Warning: {sup.RecoveryTail} — session commands exit 3 until cleared");
 
         log.Write("info", "test_done", new { runId, pass, fail, skipped, sessionDied });
         if (fail > 0)
-            o.Fail($"{fail} test failure(s) (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
+            o.Fail((sup.Crash != null ? (sup.ExcelExit == ExcelExitKind.Exited ? "Excel exited during the run; " : "Excel crashed during the run; ") : "")
+                   + $"{fail} test failure(s) (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
                    + ") — see payload.tests for failure records"
                    + (sessionDied ? $" (session ended, {sup.RestartNote})" : ""),
-                sessionDied ? sup.CompileErrorHint : null);
+                sessionDied ? sup.DeathHint : null);
         else if (skipped > 0)
-            o.Fail($"{skipped} test(s) not run because the session ended (pass {pass}) — {sup.RestartNote}, rerun required",
-                sup.CompileErrorHint);
+            o.Fail((sup.Crash != null ? sup.CrashDetail("test")! + "; " : "")
+                   + $"{skipped} test(s) not run because the session ended (pass {pass}) — {sup.RestartNote}, rerun required",
+                sup.DeathHint);
         else if (sessionDied)
-            o.Hint = sup.CompileErrorHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우
+        {
+            o.Hint = sup.DeathHint; // 전부 실행·통과했으나 마지막에 세션이 죽은 경우
+            if (sup.Crash != null) // 테스트 밖(정리 중)에 사라졌어도 성공으로 넘기지 않는다
+                o.Fail(sup.CrashDetail("test")! + $" after pass {pass} (session ended, {sup.RestartNote})", sup.DeathHint);
+        }
         return o;
     }
 
-    private static object? BuildPayload(JsonElement root, bool sessionDied)
+    private static object? BuildPayload(JsonElement root, bool sessionDied, ExcelCrashInfo? crash)
     {
         if (!root.TryGetProperty("tests", out var tests) || !root.TryGetProperty("summary", out var summary))
             return null;
         return root.TryGetProperty("watchdog", out var wd)
-            ? new { tests, summary, sessionDied, watchdog = wd }
-            : new { tests, summary, sessionDied, watchdog = (object?)null };
+            ? new { tests, summary, sessionDied, excelCrash = crash, watchdog = wd }
+            : new { tests, summary, sessionDied, excelCrash = crash, watchdog = (object?)null };
     }
 }

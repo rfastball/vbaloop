@@ -23,6 +23,7 @@ the table below is context for interpreting the hint.
 | read-only refusal + hint mentions `session attach` | After the user confirms, `session attach` -> §Attaching to the user's Excel |
 | `Excel refused to open the workbook (0x800A03EC)` (exit 3) | Do not copy/rename the workbook or edit the registry; tell the user the hint. A Note "answered Yes" on success is informational |
 | test: 1 fail + many skipped | Only the first fail's `detail` (modal text) is a real signal -> §test timeout / modal |
+| `Excel crashed while running ...` (`payload.excelCrash`) | The code crashed Excel itself; never kill the relaunched Excel -> §test timeout / modal |
 | Fixed it but same error, push keeps returning `cached:true` | `push --force` bypasses the fingerprint cache -> §push refused |
 | push refused (CP949, module mismatch, document module) | §push refused |
 | push fails + `payload.compile.result: compile_error` | Read the modal text, fix, push again -> §push compile gate |
@@ -137,6 +138,11 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
   skipped just means not run; do not use it for root-causing. Fix the code, then push + test to revalidate.
   A hint like "rerun the same command" is about the session (a fresh Excel is ready), not a reason to rerun without fixing.
   If the hint says session start, do that before rerunning
+- `detail: "Excel crashed while running X"` with `payload.excelCrash` means the Excel process itself died (access
+  violation from an API Declare call, bad pointer, etc.), not a VBA error. Fix the code X ran - rerunning unchanged code crashes again
+- After a crash Office may relaunch a **visible** Excel (`excelCrash.relaunched` PIDs) that reopens the workbook with a recovered copy.
+  **Never kill it and do not `session attach` to it** - tell the user; push is refused as read-only until the user closes it
+  (test/run still work read-only). The user decides whether to keep the recovered copy
 - MsgBox/infinite loops are cut by the timeout (default 120 s, `--timeout <seconds>`). An ephemeral Excel with only the
   session workbook open is cleaned up by the tool and the next command starts a new one (hint: rerun the same command). A persistent
   session's Excel is quarantined if the tool cannot prove there is no user work (§Session quarantined / busy) - tell the user and wait for the release

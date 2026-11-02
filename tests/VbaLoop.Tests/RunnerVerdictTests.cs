@@ -75,4 +75,14 @@ public class RunnerVerdictTests
         var (result, _) = RunnerVerdict.Decide(null, NoAsserts, null, sessionDead: true);
         Assert.Equal(RunnerVerdict.Pass, result);
     }
+
+    [Fact]
+    public void Crash_IsFail_EvenWhenSessionDead_AndAppendsComError()
+    {
+        // 프로세스가 사라진 테스트가 진짜 신호 — 죽은 세션의 오탐(skipped)으로 묻히면 안 된다
+        var (result, detail) = RunnerVerdict.Decide("예외가 발생했습니다. (0x80020009)", NoAsserts, null, sessionDead: true,
+            crashDetail: "Excel crashed while running modCrash.Test_Crash (PID 7 exited)");
+        Assert.Equal(RunnerVerdict.Fail, result);
+        Assert.Equal("Excel crashed while running modCrash.Test_Crash (PID 7 exited) | COM: 예외가 발생했습니다. (0x80020009)", detail);
+    }
 }
