@@ -14,8 +14,9 @@ public sealed class SessionInfo
     public string? Detail { get; init; }
 }
 
-/// <summary>EnsureActive 결과 — Action은 "adopted"(기존 세션 채택) 또는 "started"(신규 기동).</summary>
-public sealed record EnsureResult(dynamic App, SessionMeta Meta, string Action);
+/// <summary>EnsureActive 결과 — Action은 "adopted"(기존 세션 채택) 또는 "started"(신규 기동).
+/// OpenNote는 열기 중 Excel 프롬프트에 대신 답했을 때의 안내(없으면 null).</summary>
+public sealed record EnsureResult(dynamic App, SessionMeta Meta, string Action, string? OpenNote = null);
 
 /// <summary>세션 상태 판정/획득/오염 처리의 단일 창구 (설계 §4 공통 계약).</summary>
 public static class SessionService
@@ -34,10 +35,10 @@ public static class SessionService
         if (adopted != null) return adopted;
 
         var meta = LaunchAndOpen(cfg, log, command, cfg.Visible, readOnly: false, cfg.SessionMetaPath,
-            ephemeral: false, out dynamic app);
+            ephemeral: false, out dynamic app, out string? note);
         log.Write("info", "session_started",
             new { pid = meta.Pid, hwnd = meta.Hwnd, workbook = meta.WorkbookFullName });
-        return new EnsureResult(app, meta, "started");
+        return new EnsureResult(app, meta, "started", note);
     }
 
     /// <summary>
@@ -90,15 +91,16 @@ public static class SessionService
         string metaPath)
     {
         var meta = LaunchAndOpen(cfg, log, command, visible: false, readOnly, metaPath, ephemeral: true,
-            out dynamic app);
+            out dynamic app, out string? note);
         log.Write("info", "ephemeral_started",
             new { pid = meta.Pid, hwnd = meta.Hwnd, workbook = meta.WorkbookFullName, readOnly });
-        return new EnsureResult(app, meta, "ephemeral");
+        return new EnsureResult(app, meta, "ephemeral", note);
     }
 
     private static SessionMeta LaunchAndOpen(ProjectConfig cfg, ToolLog log, string command, bool visible,
-        bool readOnly, string metaPath, bool ephemeral, out dynamic appOut)
+        bool readOnly, string metaPath, bool ephemeral, out dynamic appOut, out string? openNote)
     {
+        openNote = null;
         var filter = OleMessageFilter.Register();
         try
         {
@@ -114,15 +116,18 @@ public static class SessionService
 
                 int prevSecurity = Convert.ToInt32(app.AutomationSecurity);
                 app.AutomationSecurity = 1; // msoAutomationSecurityLow
-                dynamic wb;
+                WorkbookOpener.Result opened;
                 try
                 {
-                    wb = app.Workbooks.Open(cfg.WorkbookPath, 0, readOnly); // UpdateLinks:=0
+                    opened = WorkbookOpener.Open(app, launch.Pid, cfg.WorkbookPath, readOnly, log);
                 }
                 finally
                 {
                     app.AutomationSecurity = prevSecurity;
                 }
+                dynamic wb = opened.Workbook;
+                openNote = opened.AcceptedPrompt == null ? null
+                    : $"Excel asked whether to open a workbook that errored last time; answered Yes: {opened.AcceptedPrompt}";
 
                 // ReadOnly:=False 명시는 잠긴 파일에서 오류를 내지 않는다 — Excel이 조용히
                 // read-only로 폴백하고, 이후 Save가 기본 저장 위치로 SaveAs 오탈출해 split-brain을

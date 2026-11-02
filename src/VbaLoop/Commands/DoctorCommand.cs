@@ -164,6 +164,20 @@ public static class DoctorCommand
         if (cfg != null)
             checks.Add(CheckWorkbookLock(cfg, meta, orphans));
 
+        // 8. Excel "사용할 수 없는 항목"에 오른 대상 워크북 — 정보성. 도구 열기는 WorkbookOpener가 처리하고,
+        //    이 항목은 사람이 Excel에서 열 때 "마지막으로 열었을 때 오류" 프롬프트를 띄우는 쪽이다.
+        if (cfg != null)
+        {
+            var disabled = ExcelDisabledItems.FindEntries(AccessVbom.VersionFromCurVer(curVer) ?? "16.0", cfg.WorkbookPath);
+            checks.Add(new Check("excel.disabledItems", true,
+                disabled.Count == 0
+                    ? "target workbook is not in Excel's disabled items"
+                    : $"target workbook is in Excel's disabled items ({string.Join(", ", disabled)}) — opening it in Excel asks"
+                      + " \"there was an error the last time ... open anyway?\"; tool commands answer Yes on their own",
+                disabled.Count == 0 ? null
+                : "To stop the prompt when opening by hand: Excel Options > Add-ins > Manage: Disabled Items > Go > Enable (the user decides)"));
+        }
+
         bool allOk = checks.Where(c => c.Name is "excel.com" or "excel.accessVBOM" or "attach.oleacc"
                                        or "workbook.lock" or "project.managedBy")
                            .All(c => c.Ok);

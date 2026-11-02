@@ -37,6 +37,8 @@ public static class SessionCommand
         o.HumanLines.Add(r.Action == "adopted"
             ? $"Existing session adopted (PID {r.Meta.Pid}{(r.Meta.IsExternal ? ", attached user's Excel" : "")}, no-op)"
             : $"Session started (PID {r.Meta.Pid}, {Path.GetFileName(r.Meta.WorkbookFullName)})");
+        if (r.OpenNote != null)
+            o.HumanLines.Add($"Note: {r.OpenNote}");
         if (cfg.SessionMode == SessionMode.Ephemeral && r.Action == "started")
             o.HumanLines.Add("Ephemeral mode, but while this session is alive push/pull/test/run/diff use this Excel — run session stop to end it");
         o.Payload = new { action = r.Action, pid = r.Meta.Pid, hwnd = r.Meta.Hwnd, workbook = r.Meta.WorkbookFullName };

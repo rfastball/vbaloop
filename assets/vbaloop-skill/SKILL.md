@@ -21,6 +21,7 @@ the table below is context for interpreting the hint.
 | Session quarantined (exit 3, hint mentions `recovery clear`/`--discard`) | Never kill Excel yourself; tell the user -> §Session quarantined / busy |
 | busy (exit 3, Excel in cell edit mode or showing a dialog) | Retry the same command shortly -> §Session quarantined / busy |
 | read-only refusal + hint mentions `session attach` | After the user confirms, `session attach` -> §Attaching to the user's Excel |
+| `Excel refused to open the workbook (0x800A03EC)` (exit 3) | Do not copy/rename the workbook or edit the registry; tell the user the hint. A Note "answered Yes" on success is informational |
 | test: 1 fail + many skipped | Only the first fail's `detail` (modal text) is a real signal -> §test timeout / modal |
 | Fixed it but same error, push keeps returning `cached:true` | `push --force` bypasses the fingerprint cache -> §push refused |
 | push refused (CP949, module mismatch, document module) | §push refused |

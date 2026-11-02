@@ -35,6 +35,8 @@ internal sealed class ExcelScope : IDisposable
         _o = o;
         App = r.App;
         Meta = r.Meta;
+        if (r.OpenNote != null)
+            o.HumanLines.Add($"Note: {r.OpenNote}");
     }
 
     public static ExcelScope Acquire(ProjectConfig cfg, ToolLog log, Outcome o, string command, ScopeAccess access)

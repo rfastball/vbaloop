@@ -108,7 +108,7 @@ public static class DistCommand
                 int prevSec = Convert.ToInt32(app.AutomationSecurity);
                 app.AutomationSecurity = 1; // msoAutomationSecurityLow — Workbook_Open 억제
                 dynamic wb;
-                try { wb = app.Workbooks.Open(stagePath, 0, false); }
+                try { wb = WorkbookOpener.Open(app, l.Pid, stagePath, false, log).Workbook; }
                 finally { app.AutomationSecurity = prevSec; }
                 if (Convert.ToBoolean(wb.ReadOnly))
                     throw new CliError($"copy opened read-only: {stagePath}",
