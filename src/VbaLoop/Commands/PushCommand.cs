@@ -62,6 +62,15 @@ public static class PushCommand
 
     public static Outcome Run(CliArgs opts)
     {
+        // 패키지 모드(설계 §13.3): 프로젝트를 읽지 않는 별도 경로 — toml·lease·sync.json을 건드리면 안 된다
+        if (opts.Package != null)
+            return PackageApplyCommand.Run(opts);
+        if (opts.Workbook != null)
+            throw new CliError("--workbook is only for push --package <file.txt>",
+                "push applies src to the project's canonical workbook; to update a business workbook use push --package <file.txt> --workbook <file>");
+        if (opts.Adopt || opts.AllowDowngrade)
+            throw new CliError("--adopt/--allow-downgrade are only for push --package");
+
         var o = new Outcome { Command = "push" };
         var cfg = ProjectConfig.Load(opts.Config, Environment.CurrentDirectory);
         var log = new ToolLog(cfg.ToolLogPath, "push");
@@ -745,35 +754,10 @@ public static class PushCommand
     /// 호출자가 이미 FormReimported(원복 불가)로 기록했다.</param>
     private static void ImportForm(SrcModule sm, dynamic proj, int codePage, ToolLog log, Journal? journal)
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "vbaloop", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            // 인코딩은 GetACP 동적 조회 (폼 예외 a) — 가드는 LoadSrc에서 이미 통과
-            var enc = Cp949Guard.GetStrict(codePage);
-            // 헤더 끝(Attribute 블록 뒤)과 본문 끝의 빈 줄을 정규화 — Export가 이 지점에
-            // 빈 줄을 누적시키는 실측 동작 때문에 트림 없이는 왕복마다 파일이 자란다
-            string content = CanonicalText.ToCanonical(
-                CanonicalText.TrimTrailingEmpty(sm.Header)
-                    .Concat(CanonicalText.TrimTrailingEmpty(sm.Body)).ToList());
-            string frmTemp = Path.Combine(tempDir, sm.Name + ".frm");
-            File.WriteAllBytes(frmTemp, enc.GetBytes(content));
-            File.Copy(sm.FrxPath!, Path.Combine(tempDir, sm.Name + ".frx"));
-
-            dynamic newComp = ComRetry.Invoke(() => proj.VBComponents.Import(frmTemp));
-            journal?.ComponentAdded(sm.Name, newComp);
-            string actualName = Convert.ToString(newComp.Name) ?? "";
-
-            // Import 후 중복 이름 검사 (폼 예외 c) — <name>1 패턴이면 save 전에 실패
-            if (!actualName.Equals(sm.Name, StringComparison.OrdinalIgnoreCase))
-                throw new CliError(
-                    $"{sm.Name}: Import result name is {actualName} — suspected duplicate copy (duplicate module signature), save aborted");
-            log.Write("info", "form_imported", new { module = sm.Name });
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, recursive: true); } catch { /* 무시 */ }
-        }
+        // 인코딩은 GetACP 동적 조회 (폼 예외 a) — 가드는 LoadSrc에서 이미 통과
+        FormImport.Import(proj, sm.Name, sm.Header, sm.Body, File.ReadAllBytes(sm.FrxPath!), codePage,
+            journal == null ? null : (Action<object>)(comp => journal.ComponentAdded(sm.Name, comp)));
+        log.Write("info", "form_imported", new { module = sm.Name });
     }
 
     // ---- 4단계: 검증형 Remove (완료 검증 없이는 Import/save 진입 금지) ----

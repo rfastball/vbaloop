@@ -65,6 +65,12 @@ public sealed class CliArgs
     public string? Backup { get; private set; }
     /// <summary>dist 전용: 게시 전 VBE 컴파일 검증을 건너뛴다(탈출구).</summary>
     public bool SkipCompile { get; private set; }
+    /// <summary>push 전용: 정본 대신 --workbook 업무 워크북에 적용할 텍스트 패키지(설계 §13.3).</summary>
+    public string? Package { get; private set; }
+    /// <summary>push --package 전용: vbaloop_Target이 없는 업무 파일의 첫 적용을 허용하고 Target을 기록한다.</summary>
+    public bool Adopt { get; private set; }
+    /// <summary>push --package 전용: 워크북보다 낮은(또는 순서를 매길 수 없는) 버전의 적용을 허용한다.</summary>
+    public bool AllowDowngrade { get; private set; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -136,6 +142,12 @@ public sealed class CliArgs
                 case "--fix": r.Fix = true; break;
                 case "--latest": r.Latest = true; break;
                 case "--skip-compile": r.SkipCompile = true; break;
+                case "--adopt": r.Adopt = true; break;
+                case "--allow-downgrade": r.AllowDowngrade = true; break;
+                case "--package":
+                    if (++i >= args.Length) throw new CliError("--package requires a package .txt path");
+                    r.Package = args[i];
+                    break;
                 case "--backup":
                     if (++i >= args.Length) throw new CliError("--backup requires a backup id");
                     r.Backup = args[i];
@@ -155,7 +167,7 @@ public sealed class CliArgs
                 default:
                     if (args[i].StartsWith('-'))
                         throw new CliError($"unknown option: {args[i]}",
-                            "Supported options: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --backup <id> --timeout <seconds> --config <path> --module <name> --out <path> --bootstrap <Module.Proc> --folder <path> --workbook <path> --new <name> --spec <design.json> --code <body.vba> --strip-comments");
+                            "Supported options: --json --prune --no-save --check --force --force-form-import --kill-orphans --discard --all --list --yes --skip-verify --enable-vbom --plan --no-install --install-only --fix --latest --skip-compile --adopt --allow-downgrade --backup <id> --timeout <seconds> --config <path> --module <name> --out <path> --bootstrap <Module.Proc> --folder <path> --workbook <path> --package <file.txt> --new <name> --spec <design.json> --code <body.vba> --strip-comments");
                     r.Positional.Add(args[i]);
                     break;
             }
@@ -183,7 +195,7 @@ public sealed class CliArgs
     public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
     {
         "--timeout", "--config", "--runid", "--session-meta", "--macro", "--module",
-        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup", "--spec", "--code",
+        "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup", "--spec", "--code", "--package",
     };
 
     /// <summary>

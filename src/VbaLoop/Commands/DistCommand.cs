@@ -30,9 +30,27 @@ public static class DistCommand
             ? Path.GetFullPath(opts.Out)
             : DistFormat.DefaultOut(cfg.RootDir, cfg.WorkbookPath);
         DistOutputKind format = DistFormat.FromOutPath(outPath); // 확장자로 형식 판정(미지원 조기 거부)
-        string formatLabel = format == DistOutputKind.AddIn ? "xlam" : "xlsm";
+        string formatLabel = format switch { DistOutputKind.AddIn => "xlam", DistOutputKind.Package => "package", _ => "xlsm" };
         bool strip = opts.StripComments || cfg.DistStripComments;
+        var warnings = new List<string>();
+
+        // 버전은 적용 쪽 판정(§13.4)이 순서를 매기는 값이라 형식과 관계없이 semver만 받는다
+        if (cfg.DistVersion != null && !SemVer.TryParse(cfg.DistVersion, out _))
+            throw new CliError($"[dist] version is not semver: '{cfg.DistVersion}'", "Use a semver like 1.2.0 in vbaloop.toml [dist] version");
         string? bootstrap = opts.Bootstrap ?? cfg.DistBootstrap;
+        if (format == DistOutputKind.Package)
+        {
+            if (cfg.DistVersion == null)
+                throw new CliError("a text package needs [dist] version — the applying side orders packages by it",
+                    "Set [dist] version = \"1.0.0\" in vbaloop.toml");
+            // 부트스트랩은 사본의 시트를 만드는 용도라 업무 워크북에서 돌면 데이터를 덮을 수 있다(§13.1)
+            if (opts.Bootstrap != null)
+                throw new CliError("--bootstrap cannot be used with a .txt package",
+                    "The package only replaces code in the business workbook; drop --bootstrap");
+            if (bootstrap != null)
+                warnings.Add($"[dist] bootstrap ({bootstrap}) ignored for a .txt package");
+            bootstrap = null;
+        }
         if (bootstrap != null && !MacroName.TryParse(bootstrap, out _, out _, out var bootErr))
             throw new CliError($"--bootstrap format error: {bootErr}", "Format: Module.Proc");
         if (PathDrift.SamePath(outPath, cfg.WorkbookPath))
@@ -83,13 +101,14 @@ public static class DistCommand
         // 한다 — 형식과 안 맞는 확장자(.tmp-*)로 SaveAs(55)하면 Excel이 스크래치 파일에 쓰고 최종
         // 리네임에 실패해 stage엔 미변형 사본만 남는다(런타임 실측 2026-07-10). 별도 .xlam 대상에
         // 저장한 뒤 원자 이동한다.
+        // 패키지: 사본은 컴파일 검증용 스테이징 워크북일 뿐이라 원본 확장자를 유지한다
+        if (format == DistOutputKind.Package) stagePath += Path.GetExtension(cfg.WorkbookPath);
         string savePath = format == DistOutputKind.AddIn ? stagePath + ".xlam" : stagePath;
         TryDelete(stagePath); // 동일 PID의 잔재(하드킬 등) 제거 후 충돌 없이 복사
         TryDelete(savePath);
         File.Copy(cfg.WorkbookPath, stagePath, overwrite: false);
 
         // 5. 임시 인스턴스에서 사본(stage) 변형
-        var warnings = new List<string>();
         if (rev == NoRevSentinel)
             warnings.Add($"git rev unavailable (not a repo or git missing) — BuildRev='{NoRevSentinel}'");
         bool moved = false;
@@ -153,10 +172,52 @@ public static class DistCommand
                         warnings.Add($"Compile check incomplete: {compile.Detail}");
                 }
 
+                if (format == DistOutputKind.Package)
+                {
+                    // 게시물은 사본이 아니라 패키지 텍스트다 — 사본은 저장 없이 버린다(finally가 정리)
+                    Dictionary<string, PackageModuleKind> kinds = ComponentKinds(proj, (string)(Convert.ToString(wb.CodeName) ?? ""));
+                    ComRetry.Invoke(() => { wb.Close(false); });
+                    try { app.Quit(); } catch { /* finally에서 kill 보증 */ }
+                    var pkgModules = DistPackageBuilder.Build(classified.Included, kinds, strip, version, rev, builtAt,
+                        name => ReadFrx(cfg, name));
+                    string text = PackageFormat.Write(new PackageFormat.Meta(cfg.ProjectName, version, rev, builtAt), pkgModules);
+                    string pkgStage = outPath + ".tmp-" + Environment.ProcessId;
+                    File.WriteAllText(pkgStage, text, CanonicalText.Utf8NoBom);
+                    PackageFormat.Package pkg;
+                    try { pkg = PackageFormat.Parse(File.ReadAllBytes(pkgStage)); } // 쓴 그대로 다시 읽혀야 게시한다
+                    catch { TryDelete(pkgStage); throw; }
+                    MoveIntoPlace(pkgStage, outPath); // 스테이징 워크북(savePath)은 moved=false라 finally가 지운다
+                    log.Write("info", "dist_done", new
+                    {
+                        outPath, format = formatLabel, version, rev, sha256 = pkg.Sha256,
+                        modules = pkgModules.Count, compile = compile?.Label ?? "skipped",
+                    });
+                    o.Payload = new
+                    {
+                        outPath, format = formatLabel, version, rev, builtAt, target = cfg.ProjectName, sha256 = pkg.Sha256,
+                        included = pkgModules.Select(m => m.FileName),
+                        excluded = classified.ExcludedNames,
+                        logShimFlipped = mut.LogShimFlipped,
+                        stripComments = strip,
+                        compile = compile == null ? new { result = "skipped", detail = (string?)null }
+                            : new { result = compile.Label, detail = compile.Detail },
+                        published = true,
+                        warnings,
+                    };
+                    o.HumanLines.Add($"dist done: {outPath} [package]");
+                    o.HumanLines.Add($"  target {cfg.ProjectName}, version {version} (rev {rev}, built {builtAt})");
+                    o.HumanLines.Add($"  {pkgModules.Count} modules, sha256 {pkg.Sha256}");
+                    o.HumanLines.Add(compile == null ? "  compile check: skipped (--skip-compile)"
+                        : $"  compile check: {compile.Label}");
+                    foreach (var w in warnings) o.HumanLines.Add($"  warning: {w}");
+                    return o;
+                }
+
                 object? bootResult = null;
                 if (bootstrap != null)
                     bootResult = RunBootstrap(app, wb, bootstrap, l.Pid, log);
 
+                SetDocProp(wb, "vbaloop_Target", cfg.ProjectName, warnings);
                 SetDocProp(wb, "vbaloop_BuildVersion", version, warnings);
                 SetDocProp(wb, "vbaloop_BuildRev", rev, warnings);
                 SetDocProp(wb, "vbaloop_BuiltAt", builtAt, warnings);
@@ -351,6 +412,36 @@ public static class DistCommand
         finally { done.Set(); }
         log.Write("info", "dist_bootstrap_done", new { macro });
         return new { macro, ran = true };
+    }
+
+    /// <summary>사본 컴포넌트 이름 → 패키지 종류. 통합 문서 모듈은 Type 100이면서 이름이 워크북 CodeName이다.</summary>
+    private static Dictionary<string, PackageModuleKind> ComponentKinds(dynamic proj, string workbookCodeName)
+    {
+        var kinds = new Dictionary<string, PackageModuleKind>(StringComparer.OrdinalIgnoreCase);
+        List<VbaProjectOps.ComponentInfo> comps = VbaProjectOps.ListComponents(proj);
+        foreach (var c in comps)
+        {
+            PackageModuleKind? kind = c.Type switch
+            {
+                VbaProjectOps.TypeStdModule => PackageModuleKind.Std,
+                VbaProjectOps.TypeClassModule => PackageModuleKind.Class,
+                VbaProjectOps.TypeMsForm => PackageModuleKind.Form,
+                VbaProjectOps.TypeDocument => c.Name.Equals(workbookCodeName, StringComparison.OrdinalIgnoreCase)
+                    ? PackageModuleKind.Workbook : PackageModuleKind.Document,
+                _ => null,
+            };
+            if (kind != null) kinds[c.Name] = kind.Value;
+        }
+        return kinds;
+    }
+
+    private static byte[] ReadFrx(ProjectConfig cfg, string formName)
+    {
+        string path = Path.Combine(cfg.SrcRoot, formName + ".frx");
+        if (!File.Exists(path))
+            throw new CliError($"{formName}.frx is missing from src — a form cannot be packaged without it",
+                "Restore the .frx with vbaloop pull, then retry");
+        return File.ReadAllBytes(path);
     }
 
     private static void SetDocProp(dynamic wb, string name, string value, List<string> warnings)

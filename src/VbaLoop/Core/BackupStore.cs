@@ -17,6 +17,7 @@ public static class BackupStore
 {
     public const string KindPush = "push";
     public const string KindPreRollback = "pre-rollback";
+    public const string KindPackage = "package";
     public const string MetadataFileName = "metadata.json";
 
     private const string StampFormat = "yyyyMMdd-HHmmss-fff";
@@ -49,6 +50,15 @@ public static class BackupStore
         [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
         /// <summary>pre-rollback 전용: 이 안전 백업 직후 복원된 백업 id.</summary>
         [JsonPropertyName("restoringFrom")] public string? RestoringFrom { get; set; }
+        /// <summary>package 전용(설계 §13.5): 적용한 패키지 해시·대상과 적용 전후 버전. 그 밖의 백업에는 기록하지 않는다.</summary>
+        [JsonPropertyName("packageSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? PackageSha256 { get; set; }
+        [JsonPropertyName("target"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Target { get; set; }
+        [JsonPropertyName("fromVersion"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? FromVersion { get; set; }
+        [JsonPropertyName("toVersion"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ToVersion { get; set; }
     }
 
     /// <summary>열거 결과 한 건. Meta == null이면 미완 슬롯.</summary>

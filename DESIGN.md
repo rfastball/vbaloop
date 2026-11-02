@@ -499,7 +499,11 @@ BuiltAt=2026-11-02T03:00:00Z
 Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 @@END_META
 
-@@FILE name=modMain.bas encoding=utf-8
+@@FILE name=modMain.bas kind=std encoding=utf-8
+(src 규약 텍스트)
+@@END_FILE
+
+@@FILE name=ThisWorkbook.cls kind=workbook encoding=utf-8
 (src 규약 텍스트)
 @@END_FILE
 
@@ -518,6 +522,9 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
   - 망연계가 줄끝만 바꾼 경우는 통과시키고 내용 변경은 잡는다. 엄격 UTF-8로 읽히지 않으면 인코딩 변환(CP949
     재인코딩 등)으로 보고 거부한다.
   - 운반 중 손상과 실수로 인한 편집을 잡는 무결성 검사이고, 위변조 방지(서명)는 아니다. 누구나 다시 계산할 수 있다.
+- 모듈 블록의 `kind`는 `std`/`class`/`form`/`document`/`workbook` 중 하나이고, 확장자와 맞아야 한다(`workbook`은
+  하나만). `.cls` 헤더만으로는 시트·통합 문서 모듈과 클래스를 가를 수 없어, dist가 스테이징 사본의 컴포넌트
+  타입과 `Workbook.CodeName`으로 정해 싣는다. `.frx` 블록에는 `kind`가 없다.
 - `Modules`는 mirror 판정의 기준이다. `@@FILE` 블록과 목록이 어긋나면 거부한다.
 - 모듈 본문의 행이 예약 마커와 같으면 dist가 거부한다.
 - 읽는 쪽이 모르는 `FormatVersion`이면 추측하지 않고 거부한다. hint는 exe 갱신이다(반입 환경이면 새 exe 반입).
@@ -525,6 +532,7 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 ### 13.3 적용: `push --package <txt> --workbook <파일>`
 - 둘은 짝이다. 하나만 있으면 exit 2. `--workbook`의 기본값을 정본으로 두지 않는 것은 패키지를 개발 정본에,
   src를 업무 파일에 잘못 넣는 사고를 막기 위해서다.
+- 대상은 매크로 사용 형식(`.xlsm`/`.xlsb`/`.xlam`)만 받는다. `.xlsx`에 넣고 저장하면 코드가 사라진다.
 - 프로젝트 없이 돈다. `vbaloop.toml`을 찾지 않고(`--config`는 거부), lease·`_dbg\`·지문 캐시·레지스트리를
   쓰지 않는다. 프로젝트 폴더 안에서 실행해도 그 프로젝트의 동기화 상태는 바뀌지 않는다(바뀌면 dist가
   "마지막 push == src"로 오판한다). 같은 대상 경로의 동시 실행은 경로 기반 네임드 뮤텍스로 직렬화한다.
@@ -536,9 +544,11 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
     닫고 다시 실행"이고, 같은 폴더의 `~$<파일 이름>` 잠금 파일에서 연 사람을 읽을 수 있으면 함께 싣는다.
   - 파일에 읽기 전용 속성이 있으면 exit 2다. 닫아도 풀리지 않으므로 속성 해제를 hint로 준다.
 - 순서:
-  1. 패키지 파싱·해시 검증(Excel 전).
+  1. 패키지 파싱·해시 검증, ACP 가드(Excel 전). 대상 PC의 ACP가 개발 PC와 다를 수 있어, 모듈 텍스트가 대상
+     ACP로 표현되지 않으면 주입 전에 거부한다.
   2. 워크북을 열어 문서 속성을 읽고 대상·버전을 판정한다(§13.4).
-  3. `--plan`이면 판정과 모듈 계획(추가·교체·제거·미변경 문서 모듈)을 보고하고 저장 없이 닫는다.
+  3. `--plan`이면 판정과 모듈 계획(추가·교체·제거·미변경 문서 모듈)을 보고하고 저장 없이 닫는다. 적용 기록
+     (`apply.jsonl`, §13.5)도 남기지 않는다.
   4. 백업(§13.5).
   5. 주입: push 3~4단계와 같다. 패키지에 없는 표준·클래스·폼 모듈은 제거한다(`--prune` 상시). 폼은 항상
      재Import한다(비교할 근거가 없다). 문서 모듈 규칙:
@@ -570,6 +580,8 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
   - 컴포넌트 집합(이름과 종류)이 같다. 워크북에만 있는 표준·클래스·폼 모듈은 prune 대상이라 "다름"으로 센다.
     워크북에만 있는 시트 모듈은 적용이 건드리지 않으므로(§13.3) 비교에서 뺀다.
   - 모든 모듈의 코드가 같다(push의 변경 판정과 같은 정규화). 폼은 코드비하인드만 `CodeModule.Lines`로 비교한다.
+  - 합성 `modBuildInfo`는 비교에서 뺀다. 빌드마다 `BuiltAt`이 달라, 같은 src를 다시 빌드한 패키지(예: 워크북 dist와
+    같은 버전의 패키지)를 "다른 코드"로 거부하게 된다. 버전 자체는 앞 단계가 문서 속성으로 판정한다.
   - 폼 레이아웃은 비교하지 않는다. 연속 Export에서도 frx 바이트가 달라지고, Caption을 바꿔도 frm 텍스트가
     같아서(experiments/userform) 디자이너 비교를 믿을 수 없다. 현장에서 레이아웃만 바뀐 파일은 "이미 적용됨"으로
     지나가므로, 바로잡으려면 버전을 올려 다시 배포한다. 실제로 적용하는 경로는 폼을 항상 재Import하므로 영향이 없다.
@@ -584,8 +596,11 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 워크북 dist(§9.4)도 `vbaloop_Target`을 기록해, dist 배포본에서 시작한 업무 파일은 `--adopt`가 필요 없다.
 
 ### 13.5 백업
-- 4단계에서 `SaveCopyAs`로 `%LOCALAPPDATA%\vbaloop\backups\<파일 이름>-<경로 해시 8자>\<UTC id>-<이전 버전>\`에
-  사본과 `metadata.json`(원래 전체 경로, 패키지 해시, 이전·새 버전, 대상)을 남긴다.
+- 4단계에서 `%LOCALAPPDATA%\vbaloop\backups\<파일 이름>-<경로 해시 8자>\<UTC id>-package\`에 사본과
+  `metadata.json`(원래 전체 경로, 패키지 해시, 이전·새 버전, 대상)을 남긴다. 슬롯 형식은 `BackupStore`와 같다.
+  - 사본은 `SaveCopyAs`가 아니라 디스크 파일의 바이트 복사다. 이 시점까지 아무것도 바꾸지 않았으므로 디스크
+    파일이 곧 적용 전 상태이고, 바이트가 같은 사본이 복원에 더 정확하다. Excel의 쓰기 경로에도 기대지 않는다
+    (E2E에서 `SaveCopyAs`가 `%LOCALAPPDATA%` 아래 새로 만든 폴더에 1004로 실패한 환경이 있었다).
   - 업무 파일 옆에 두지 않는 것은 공유 드라이브에 백업이 쌓이거나 쓰기 권한이 없어 적용 자체가 막히는 것을
     피하기 위해서다. 경로 해시는 이름이 같은 다른 폴더의 파일을 구분한다.
   - 찾기 어려워지는 대가는 출력으로 메운다. plan·결과·드래그 창과 `payload.backup`에 백업 전체 경로를 항상 싣는다.

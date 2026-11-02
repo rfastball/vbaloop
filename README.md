@@ -154,7 +154,7 @@ flowchart LR
 | **일회용 Excel** | 기본은 명령마다 숨은 Excel을 띄우고 닫는다. 명령 사이에 남는 Excel이 없어 꼬일 상태가 없고, 테스트는 매번 디스크의 워크북에서 깨끗하게 시작한다 |
 | **사용자 Excel 보호** | 응답하지 않는 Excel에 사용자 작업이 남아 있을 수 있으면 강제로 종료하지 않는다. 대신 격리 상태로 표시하고 확인을 요청한다(`recovery status`). 이미 열어 둔 워크북은 `session attach`로 그대로 쓴다 |
 | **에이전트 연동** | `init`이 `CLAUDE.md`/`AGENTS.md`의 관리 블록과 Claude Code 스킬을 설치하고 최신으로 유지한다. 모든 명령이 `--json`을 지원한다 |
-| **배포본 빌드** | `dist`가 테스트 모듈을 빼고 버전을 찍은 뒤, VBE 컴파일 검증까지 통과한 `.xlsm`/`.xlam`을 만든다 |
+| **배포본 빌드** | `dist`가 테스트 모듈을 빼고 버전을 찍은 뒤, VBE 컴파일 검증까지 통과한 `.xlsm`/`.xlam`을 만든다. `.txt` 패키지로 만들면 업무 워크북의 코드만 바꿀 수 있다 |
 | **단일 exe** | 애드인이나 런타임 설치가 필요 없다. 설치 스크립트는 SHA-256을 확인한 뒤 `%LOCALAPPDATA%\vbaloop\bin` 한 곳에만 설치한다 |
 
 ## 테스트 작성
@@ -183,6 +183,7 @@ End Sub
 | `status` | 세션 상태, src가 워크북에 반영됐는지 |
 | `session start\|attach\|stop` | 계속 띄워 두는 Excel 세션 시작, 이미 열린 워크북 채택, 종료(`--no-save`, `--discard`) |
 | `push [--force] [--prune] [--skip-compile]` | src를 워크북에 반영. 컴파일이 통과해야 저장한다 |
+| `push --package <txt> --workbook <파일> [--plan] [--adopt] [--allow-downgrade]` | 텍스트 패키지로 업무 워크북의 코드만 교체(프로젝트 불필요) |
 | `form build --spec <json> --code <vba> [--force]` | JSON 디자인과 VBA 코드로 src에 frm/frx 생성. 이후 `push`로 적용 |
 | `pull [--force]` | 워크북 코드를 src로 가져오기 |
 | `diff [--module <이름>]` | 워크북과 src 비교(아무것도 바꾸지 않음) |
@@ -191,7 +192,7 @@ End Sub
 | `rollback --list\|--latest\|--backup <id>` | push 직전 백업으로 워크북 복원 |
 | `recovery status\|clear [--force]` | 격리 상태 확인·해제 |
 | `lint` | 인코딩·규약 검사(Excel 불필요) |
-| `dist [--out <경로>]` | 배포본 빌드 |
+| `dist [--out <경로>]` | 배포본 빌드. 확장자로 형식을 고른다(`.xlsm`/`.xlam`/`.txt` 패키지) |
 | `lease acquire\|release\|status\|break` | 여러 에이전트가 한 프로젝트를 동시에 쓰지 않게 하는 잠금(보통 자동) |
 | `bugreport "<제목>"` | vbaloop 결함 리포트 작성 |
 | `version` | 버전과 빌드 정보 |
@@ -201,6 +202,22 @@ End Sub
   새 버전 알림이 있으면 `update: {current, latest, command}`가 덧붙는다
 - 실패하면 한 줄 에러와 다음에 할 일(`hint`)을 알려 준다.
 - 종료 코드: 성공 0 / 환경 오류 3(세션·Excel 문제, 사용 중, 격리) / 그 외 2
+
+### 업무 워크북에 코드만 배포하기
+
+현장에서 데이터를 쌓아 온 업무 워크북은 배포본으로 덮어쓸 수 없다. 이때는 코드만 담은 텍스트 패키지를 만들어
+반입하고, 대상 PC에서 그 워크북에 적용한다. 시트·데이터·이름 정의·서식은 그대로 남는다.
+
+```powershell
+vbaloop dist --out dist\지출관리-1.3.0.txt                    # 개발 PC: [dist] version 필수
+vbaloop push --package 지출관리-1.3.0.txt --workbook 지출관리.xlsm   # 대상 PC
+```
+
+- 대상 PC에서는 `.txt`와 워크북을 함께 `vbaloop.exe` 위로 끌어다 놓아도 된다. 계획을 보여 주고 적용 여부를 묻는다.
+- 적용 전에 `%LOCALAPPDATA%\vbaloop\backups\`에 원본을 백업한다. 복원은 출력에 나온 사본을 원래 자리에 복사한다.
+- 다른 대상의 패키지, 이전 버전(`--allow-downgrade`로 허용), 같은 버전인데 코드가 다른 패키지는 거부한다.
+  이미 적용된 패키지는 아무것도 하지 않는다. dist로 만든 적 없는 워크북의 첫 적용에는 `--adopt`가 필요하다.
+- 컴파일이 통과해야 저장한다. 실패하면 디스크의 워크북은 적용 전 그대로다.
 
 ### 에이전트가 폼을 처음부터 작성하기
 
@@ -250,7 +267,7 @@ root = "src"
 compile = true            # false면 push 전 컴파일 검사를 끈다(기존 컴파일 오류가 있는 워크북용)
 
 [dist]                    # 선택
-version = "1.0.0"
+version = "1.0.0"         # semver. .txt 패키지 빌드에는 필수
 exclude = ["Test_*"]
 
 [backup]                  # 선택
