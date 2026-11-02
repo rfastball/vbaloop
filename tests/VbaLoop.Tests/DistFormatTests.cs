@@ -23,10 +23,15 @@ public class DistFormatTests
     [InlineData("out.xlsx")]  // 매크로 없음
     [InlineData("out.xls")]
     [InlineData("out.xla")]   // 구 바이너리 애드인 미지원
-    [InlineData("out.txt")]
     [InlineData("out")]        // 무확장
     public void FromOutPath_Unsupported_Throws(string path)
         => Assert.Throws<CliError>(() => DistFormat.FromOutPath(path));
+
+    [Theory]
+    [InlineData("out.txt")]
+    [InlineData(@"C:\dist\App.TXT")]
+    public void FromOutPath_Txt_Package(string path)
+        => Assert.Equal(DistOutputKind.Package, DistFormat.FromOutPath(path));
 
     [Fact]
     public void DefaultOut_UnderDistWithXlsmExtension()

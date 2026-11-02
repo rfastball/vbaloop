@@ -28,7 +28,11 @@ internal static class Program
         // 경로 문자를 포함하지 않으므로 setup --workbook으로 해석한다. 셸에서 `vbaloop Book.xlsm`도 같다.
         if (WorkbookIntake.LooksLikePath(args[0]))
         {
-            int paths = CliArgs.Positionals(args).Count(WorkbookIntake.LooksLikePath);
+            // 패키지 .txt가 끼어 있으면 패키지 적용 진입(설계 §13.6) — 나머지 경로는 대상 워크북
+            var dropped = CliArgs.Positionals(args).Where(WorkbookIntake.LooksLikePath).ToList();
+            if (dropped.Any(PackageDrop.IsPackagePath))
+                return PackageDrop.Run(args, dropped);
+            int paths = dropped.Count;
             if (paths > 1)
             {
                 var multi = new Outcome { Command = "setup" };
@@ -185,7 +189,7 @@ internal static class Program
     {
         var o = new Outcome { Command = "help" };
         o.HumanLines.Add(UsageText());
-        o.Payload = new { commands = new[] { "setup [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <name>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "form build --spec <design.json> --code <body.vba> [--force]", "test", "run <Module.Proc>", "dist [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <title> | --list", "version", "update [--check] [--yes] [--force]" } };
+        o.Payload = new { commands = new[] { "setup [--workbook <path.xlsm> | --new <name> | --folder <path>] [--plan] [--yes] [--enable-vbom] [--skip-verify] [--install-only]", "init [--check] [--all]", "doctor [--kill-orphans]", "status", "diff [--module <name>]", "session start|attach|stop [--discard]", "recovery status|clear [--force]", "pull [--force]", "push [--force] [--prune] [--skip-compile]", "push --package <file.txt> --workbook <file> [--plan] [--adopt] [--allow-downgrade]", "form build --spec <design.json> --code <body.vba> [--force]", "test", "run <Module.Proc>", "dist [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]", "rollback --list | --latest | --backup <id>", "lease acquire|release|status|break", "lint", "bugreport <title> | --list", "version", "update [--check] [--yes] [--force]" } };
         return o;
     }
 
@@ -196,6 +200,7 @@ internal static class Program
 
         First time: vbaloop setup   (environment check -> install -> pick workbook/folder -> harness -> verify)
         Existing workbook: drag the .xlsm onto vbaloop.exe (works on a copy in a <name>\ folder next to the original)
+        Update a business workbook: drag the package .txt (and the workbook) onto vbaloop.exe
         New project: vbaloop setup --new <name>   (workbook + sample test in .\<name>\)
 
         Usage:
@@ -209,10 +214,11 @@ internal static class Program
           vbaloop recovery status|clear [--force]  check/clear quarantine (clear only after confirming the quarantined Excel is closed; --force with a warning)
           vbaloop pull    [--json] [--force]       workbook -> src (blocked if src has unsynced edits)
           vbaloop push    [--json] [--force] [--prune] [--force-form-import] [--skip-compile]   src -> workbook (in-place injection -> save only if VBE compile passes; --force bypasses the fingerprint cache and re-injects everything)
+          vbaloop push    --package <file.txt> --workbook <file> [--plan] [--adopt] [--allow-downgrade]   replace only the VBA code of a business workbook with a dist text package (no project needed; backup + compile check before saving)
           vbaloop test    [--json] [--timeout N]   run/read Test_* procedures
           vbaloop form build --spec <design.json> --code <body.vba> [--force] [--json]   generate src frm/frx in private Excel; then push
           vbaloop run     <Module.Proc> [--timeout N]   run a single arbitrary macro
-          vbaloop dist    [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   clean-copy distribution build (§9, VBE compile check before publishing, .xlam also supported)
+          vbaloop dist    [--out <path>] [--strip-comments] [--bootstrap <Module.Proc>] [--skip-compile]   clean-copy distribution build (§9, VBE compile check before publishing, .xlam and .txt text package also supported)
           vbaloop rollback --list | --latest | --backup <id> [--json]   restore the workbook from a pre-push backup (only while no persistent session is running)
           vbaloop lease   acquire|release|status|break [--force]   multi-agent lease
           vbaloop lint    [--json]                 full check of conventions/encoding/headers (no Excel needed)

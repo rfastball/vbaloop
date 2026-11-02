@@ -6,6 +6,8 @@ public enum DistOutputKind
     MacroWorkbook,
     /// <summary>.xlam — Excel 애드인(IsAddin=True + SaveAs xlOpenXMLAddIn).</summary>
     AddIn,
+    /// <summary>.txt — 텍스트 패키지(설계 §13). 사본은 컴파일 검증용이고 게시물은 패키지 텍스트다.</summary>
+    Package,
 }
 
 /// <summary>
@@ -29,9 +31,10 @@ public static class DistFormat
         {
             ".xlsm" => DistOutputKind.MacroWorkbook,
             ".xlam" => DistOutputKind.AddIn,
+            ".txt" => DistOutputKind.Package,
             _ => throw new CliError(
                 $"--out extension not supported: '{(ext.Length == 0 ? "(none)" : ext)}'",
-                "Supported extensions: .xlsm (macro workbook), .xlam (add-in)"),
+                "Supported extensions: .xlsm (macro workbook), .xlam (add-in), .txt (text package)"),
         };
     }
 
