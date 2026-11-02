@@ -37,10 +37,12 @@ public sealed class LeaseOwner
 /// </summary>
 public static class LeaseFile
 {
-    /// <summary>TTL — 게이트 명령마다 heartbeat로 연장 (vh와 동일 값).</summary>
-    public const int TtlSeconds = 1800;
-    /// <summary>만료 후 이만큼 더 유휴여야 회수 가능 (vh와 동일 값).</summary>
-    public const int ReclaimGraceSeconds = 1800;
+    /// <summary>TTL — 게이트 명령마다 heartbeat로 연장. TTL+grace = 유휴 회수 20분: 작업을 끝낸 세션이
+    /// 열린 채 남으면 에이전트 프로세스가 살아 있고(Codex는 PID조차 없다) 이 백스톱만 남는다 — vh의
+    /// 60분은 다음 세션을 그만큼 막았다(2026-11-02). 정상 경로는 작업 끝의 lease release다.</summary>
+    public const int TtlSeconds = 600;
+    /// <summary>만료 후 이만큼 더 유휴여야 회수 가능.</summary>
+    public const int ReclaimGraceSeconds = 600;
     /// <summary>owner null/파싱 실패 회수의 최소 파일 연령 — 기록 직후 순간을 강탈로 오판 방지.</summary>
     public const int NullOwnerMinAgeSeconds = 10;
 

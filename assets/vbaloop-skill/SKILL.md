@@ -123,7 +123,8 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 
 - Mutating commands (session/pull/push/test) acquire it automatically. Normally nothing to do
 - If another agent holds it, the command exits 2 immediately and shows the owner/idle time
-- If the idle time is short, retry shortly. If the owner died or has been idle for 1 hour, it is reclaimed automatically
+- If the idle time is short, retry shortly. If the owner died or has been idle for 20 minutes, it is reclaimed automatically
+- When your task is done, run `vbaloop lease release` yourself - an open but finished session otherwise blocks the next one
 - Only force-release a lease that is clearly abandoned, with `vbaloop lease break --force`
 
 ### test timeout / modal / session death

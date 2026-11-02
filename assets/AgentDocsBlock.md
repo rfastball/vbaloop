@@ -19,6 +19,9 @@ Write project-specific content outside this managed block (init overwrites the i
    Backup to _dbg\backups\ right before injecting)
 4. Run: vbaloop test (runs every Test_* + reads the LogShim jsonl, --timeout <seconds>)
 5. Fix: on fail, fix the cause and go back to 1; when green you are done (commit now if you use version control)
+6. Release: when the task is finished (green and reported, or you stop working on this project), run `vbaloop lease release`.
+   Commands take the project lease automatically and nothing else frees it while your session stays open,
+   so skipping this blocks the next agent for up to 20 minutes. If you opened a session with session start, session stop releases it instead
 
 - Every command supports --json: {command, ok, exitCode, hint, errors[], payload}
 - exit code: success 0 / environment error 3 (session/Excel/COM/busy/quarantined - follow the hint) / otherwise 2

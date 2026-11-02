@@ -63,7 +63,7 @@ public class LeaseFileTests
     [Fact]
     public void ProcessBound_AliveButIdlePastGrace_Reclaimed()
     {
-        // 유휴 백스톱(자동 획득 모델 정합 수정): 살아있어도 만료+grace(1800s) 경과면 회수
+        // 유휴 백스톱(자동 획득 모델 정합 수정): 살아있어도 만료+grace 경과면 회수
         var o = Owner(expiresInSec: -(LeaseFile.ReclaimGraceSeconds + 60));
         Assert.True(Reclaimable(o, alive: true));
     }
