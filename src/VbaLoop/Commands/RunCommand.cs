@@ -53,6 +53,14 @@ public static class RunCommand
                 sup.SessionHint, environment: true);
             return o;
         }
+        if ((sup.ExitCode != 0 || sup.Root == null) && sup.Crash != null)
+        {
+            // 러너가 결과를 못 낸 채 Excel이 사라졌다 — 러너 오류보다 크래시가 먼저다
+            o.Fail(sup.CrashDetail($"run {macro}")! + $" (session ended, {sup.RestartNote})", sup.DeathHint);
+            if (sup.RelaunchWarning != null) o.HumanLines.Add(sup.RelaunchWarning);
+            o.Payload = new { sessionDied = true, excelCrash = sup.Crash };
+            return o;
+        }
         if (sup.ExitCode != 0 || sup.Root == null)
         {
             log.Write("error", "runner_failed", new { runId, exitCode = sup.ExitCode, stderr = sup.Stderr });
@@ -68,13 +76,19 @@ public static class RunCommand
             return o;
         }
         object? payload = root.TryGetProperty("watchdog", out var wd)
-            ? new { run, sessionDied = sup.SessionDiedAfterModal, watchdog = wd }
-            : new { run, sessionDied = sup.SessionDiedAfterModal, watchdog = (object?)null };
+            ? new { run, sessionDied = sup.SessionDiedAfterModal, excelCrash = sup.Crash, watchdog = wd }
+            : new { run, sessionDied = sup.SessionDiedAfterModal, excelCrash = sup.Crash, watchdog = (object?)null };
         o.Payload = payload;
 
         string result = run.TryGetProperty("result", out var r) ? r.GetString() ?? "?" : "?";
         string? detail = run.TryGetProperty("detail", out var d) && d.ValueKind == JsonValueKind.String
             ? d.GetString() : null;
+        // 부모 백스톱만 소멸을 본 경우(러너는 일반 오류로 판정) 크래시를 앞세운다
+        if (sup.Crash != null && (detail == null || !detail.StartsWith("Excel ", StringComparison.Ordinal)))
+        {
+            result = "fail";
+            detail = sup.CrashDetail(macro) + (detail != null ? $" | {detail}" : "");
+        }
         string returnType = run.TryGetProperty("returnType", out var rt) ? rt.GetString() ?? "?" : "?";
         string returnValue = run.TryGetProperty("returnValue", out var rv) ? rv.ToString() : "";
         long elapsed = run.TryGetProperty("elapsedMs", out var el) ? el.GetInt64() : 0;
@@ -86,7 +100,9 @@ public static class RunCommand
             o.HumanLines.Add($"Note: {failedAsserts} failed assertion(s) in range (unrelated to run success, see payload.run)");
 
         if (sup.SessionDiedAfterModal)
-            o.HumanLines.Add($"Warning: Excel session ended after dismissing a compile error modal — {sup.RestartNote}");
+            o.HumanLines.Add(sup.DeathWarning);
+        if (sup.RelaunchWarning != null)
+            o.HumanLines.Add(sup.RelaunchWarning);
         if (sup.Marker != null)
             o.HumanLines.Add($"Warning: {sup.RecoveryTail} — session commands exit 3 until cleared");
 
@@ -94,7 +110,7 @@ public static class RunCommand
         if (result != "ok")
             o.Fail($"run {macro} failed" + (detail != null ? $": {detail}" : "")
                    + (sup.SessionDiedAfterModal ? $" (session ended, {sup.RestartNote})" : ""),
-                sup.SessionDiedAfterModal ? sup.CompileErrorHint : null);
+                sup.SessionDiedAfterModal ? sup.DeathHint : null);
         return o;
     }
 }

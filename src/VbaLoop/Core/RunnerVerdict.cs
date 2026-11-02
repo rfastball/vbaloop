@@ -12,9 +12,14 @@ public static class RunnerVerdict
     public const string Fail = "fail";
     public const string Skipped = "skipped";
 
+    /// <param name="crashDetail">이 테스트 도중 Excel 프로세스가 사라졌으면 그 설명 — 진짜 신호이므로 skipped가 아니라 fail.</param>
     public static (string Result, string? Detail) Decide(
-        string? runError, IReadOnlyList<string> failedAsserts, string? modalDetail, bool sessionDead)
+        string? runError, IReadOnlyList<string> failedAsserts, string? modalDetail, bool sessionDead,
+        string? crashDetail = null)
     {
+        if (crashDetail != null)
+            return (Fail, crashDetail + (modalDetail != null ? $" | {modalDetail}" : "")
+                          + (runError != null ? $" | COM: {runError}" : ""));
         // 모달 본문이 실제 오류 메시지 — 세션이 죽었어도 이 테스트가 진짜 신호이므로 fail 유지
         if (modalDetail != null)
             return (Fail, modalDetail + (runError != null ? $" | COM: {runError}" : ""));
