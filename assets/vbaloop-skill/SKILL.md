@@ -165,7 +165,12 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
   and read those lines instead of guessing a `--timeout`
 - To stop a run, stop the command (Ctrl+C / stop the background task). The macro stops at its next LogShim call:
   `result: "cancelled"` (test: the running test and the rest are skipped), records up to that point are kept, and the
-  session is intact. `End` skips the macro's own cleanup (workbooks it opened stay open)
+  session is intact. `End` skips the macro's own cleanup; the runner undoes what it can after a cancel or runtime error
+  (`Cleanup after the interrupted macro: ...` / `NOTE <test> was interrupted: ...`): Application EnableEvents/Calculation/
+  StatusBar/Interactive/Cursor go back to their values before the run, and workbooks the macro left open are closed without
+  saving in an ephemeral session if nothing is lost (new books, or files with no unsaved changes; the rest and anything in a
+  kept session are only reported). Half-written sheet data is not undone - make test setup
+  idempotent instead of relying on cleanup code
 - If it does not reach a LogShim call within 30 s (or Ctrl+C is pressed twice) the tool forces it: the runner is killed,
   an ephemeral Excel with only the session workbook is cleaned up (hint: rerun the same command), anything else is
   quarantined - apply §Session quarantined / busy. Long loops that log nothing should call `LogShim.Poll`
@@ -174,7 +179,8 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
   macro ...`). If only the vbaloop process was killed, its runner cancels the macro and cleans up within the 30 s grace.
   If the whole process tree was killed, the next command asks the macro to stop and refuses with `The previous vbaloop
   run was killed ...` until it stops or 30 s pass. Retry shortly; do not kill Excel
-- `the project's LogShim cannot be cancelled (it predates BeginRun - run vbaloop init)`: run `vbaloop init`, then push
+- `The workbook's LogShim predates cancel support` / `The workbook has no LogShim module`: test/run refuse to start - run
+  `vbaloop init`, then push
 
 ### push refused
 

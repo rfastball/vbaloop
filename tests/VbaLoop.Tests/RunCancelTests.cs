@@ -171,18 +171,6 @@ public class RunCancelTests : IDisposable
     }
 
     [Fact]
-    public void Orphan_LiveExcel_OldLogShimDoesNotWait()
-    {
-        var cfg = Cfg();
-        Directory.CreateDirectory(cfg.DbgDir);
-        var rec = TreeKilled("r6");
-        rec.CancelSupported = false;
-        File.WriteAllText(RunLock.RecordPath(cfg), JsonSerializer.Serialize(rec));
-        RunLock.ThrowIfActive(cfg);
-        Assert.False(File.Exists(RunLock.RecordPath(cfg)));
-    }
-
-    [Fact]
     public void ClearAll_RemovesFlagsUnlessARunIsRecorded()
     {
         var cfg = Cfg();
@@ -241,15 +229,91 @@ public class RunCancelTests : IDisposable
     }
 
     [Fact]
-    public void ActiveRun_CancelSupportedRoundTrips()
+    public void ActiveRun_RecordFromOlderBuildStillLoads()
     {
         var cfg = Cfg();
-        var rec = Record("r1", Environment.ProcessId, SelfStart);
-        using var rl = RunLock.Hold(cfg, rec)!;
-        Assert.Null(RunLock.Load(RunLock.RecordPath(cfg))!.CancelSupported);
-        rec.CancelSupported = false;
-        rl.Update(rec);
-        Assert.False(RunLock.Load(RunLock.RecordPath(cfg))!.CancelSupported);
+        Directory.CreateDirectory(cfg.DbgDir);
+        File.WriteAllText(RunLock.RecordPath(cfg), "{\"runId\":\"r1\",\"cancelSupported\":false}");
+        Assert.Equal("r1", RunLock.Load(RunLock.RecordPath(cfg))!.RunId);
+    }
+
+    // ---- LogShim 취소 지원 판정 ----
+
+    [Theory]
+    [InlineData("Public Sub BeginRun(runId As String)\r\n    mRunId = runId\r\nEnd Sub", true)]
+    [InlineData("Option Explicit\r\n  public sub beginrun (ByVal runId As String)\r\nEnd Sub", true)]
+    [InlineData("Public Sub LogD(level As String, msg As String)\r\nEnd Sub", false)]
+    [InlineData("' Public Sub BeginRun(runId As String)", false)]
+    [InlineData("Private Sub BeginRun(runId As String)", false)]
+    [InlineData("Public Sub BeginRunner(x As String)", false)]
+    public void ShimSupportsCancel_NeedsPublicBeginRun(string body, bool expected)
+        => Assert.Equal(expected, RunCancel.ShimSupportsCancel(body));
+
+    [Fact]
+    public void ShimSupportsCancel_CanonicalLogShim()
+    {
+        var asm = typeof(RunCancel).Assembly;
+        using var s = asm.GetManifestResourceStream("VbaLoop.assets.LogShim.bas")!;
+        Assert.True(RunCancel.ShimSupportsCancel(new StreamReader(s).ReadToEnd()));
+    }
+
+    // ---- 중간에 끊긴 매크로의 뒷정리 ----
+
+    private static readonly AppSettings Baseline = new(EnableEvents: true, Calculation: -4105, StatusBar: null,
+        Interactive: true, Cursor: -4143);
+
+    [Fact]
+    public void AppSettings_UnchangedReportsNothing()
+        => Assert.Empty(AppSettings.Changed(Baseline, Baseline with { }));
+
+    [Fact]
+    public void AppSettings_ReportsEachChangedSetting()
+    {
+        var after = Baseline with { EnableEvents = false, Calculation = -4135, StatusBar = "Working 3/10", Interactive = false, Cursor = 2 };
+        Assert.Equal(new[] { "EnableEvents", "Calculation", "StatusBar", "Interactive", "Cursor" }, AppSettings.Changed(Baseline, after));
+        Assert.Equal(new[] { "StatusBar" }, AppSettings.Changed(Baseline with { StatusBar = "x" }, Baseline));
+    }
+
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData("FALSE", null)] // 문구를 쓴 뒤 False로 돌려준 Excel이 돌려주는 값
+    [InlineData("false", null)]
+    [InlineData("Working 3/10", "Working 3/10")]
+    [InlineData("", "")]
+    public void StatusBarText_TreatsFalseStringAsExcelInControl(object? value, string? expected)
+        => Assert.Equal(expected, AppSettings.StatusBarText(value));
+
+    [Fact]
+    public void NewWorkbooks_OnlyThoseOpenedDuringTheRun()
+    {
+        var before = new[] { @"C:\p\Book.xlsm", "PERSONAL.XLSB" };
+        var after = new[] { @"c:\P\BOOK.xlsm", "PERSONAL.XLSB", "Book1", @"C:\data\in.xlsx" };
+        Assert.Equal(new[] { "Book1", @"C:\data\in.xlsx" }, RunAftermath.NewWorkbooks(before, after));
+        Assert.Empty(RunAftermath.NewWorkbooks(before, new[] { @"C:\p\Book.xlsm" })); // 닫힌 기존 문서는 다루지 않는다
+    }
+
+    [Fact]
+    public void Aftermath_EmptyAndSummary()
+    {
+        var none = Array.Empty<string>();
+        Assert.True(new RunAftermath(none, none, none, none).IsEmpty);
+        var a = new RunAftermath(new[] { "EnableEvents", "Calculation" }, new[] { "Book1" }, none, none);
+        Assert.False(a.IsEmpty);
+        Assert.Equal("restored Application.EnableEvents, Application.Calculation to the value before the run; "
+                     + "closed without saving 1 workbook(s) the macro left open (Book1)", a.Summary);
+        var kept = new RunAftermath(none, none, new[] { "Book1" }, new[] { "Application.Cursor" });
+        Assert.Contains("left 1 workbook(s) open (Book1) - not closed (a kept session, or a saved file with unsaved changes)", kept.Summary);
+        Assert.Contains("could not undo: Application.Cursor", kept.Summary);
+    }
+
+    [Fact]
+    public void Aftermath_SerializesWithoutIsEmpty()
+    {
+        var none = Array.Empty<string>();
+        string json = JsonSerializer.Serialize(new RunAftermath(new[] { "Cursor" }, none, none, none), Output.JsonOptions);
+        Assert.DoesNotContain("isEmpty", json);
+        Assert.Contains("\"summary\"", json);
+        Assert.Contains("\"restored\"", json);
     }
 
     // ---- LogShim 취소 레코드 ----
@@ -287,6 +351,36 @@ public class RunCancelTests : IDisposable
         string jsonl = Path.Combine(_dir, "Book.jsonl");
         File.WriteAllText(jsonl, "{\"kind\":\"X\",\"event\":\"cancelled\",\"runId\":\"r1\"}\r\n");
         Assert.True(RunnerMain.SpanCancelled(jsonl, 1_000_000, "r1"));
+    }
+
+    [Fact]
+    public void ScanForCancel_ReadsOnlyCompleteLinesAndAdvances()
+    {
+        Directory.CreateDirectory(_dir);
+        string jsonl = Path.Combine(_dir, "Book.jsonl");
+        File.WriteAllText(jsonl, "{\"kind\":\"X\",\"event\":\"cancelled\",\"runId\":\"r1\"}\r\n", new UTF8Encoding(false));
+        long pos = new FileInfo(jsonl).Length; // 실행 전부터 있던 기록은 보지 않는다
+        Assert.False(RunCancel.ScanForCancel(jsonl, ref pos, "r1"));
+        File.AppendAllText(jsonl, "{\"kind\":\"D\",\"msg\":\"x\"}\r\n{\"kind\":\"X\",\"event\":\"cance");
+        long afterFirstLine = pos + "{\"kind\":\"D\",\"msg\":\"x\"}\r\n".Length;
+        Assert.False(RunCancel.ScanForCancel(jsonl, ref pos, "r1"));
+        Assert.Equal(afterFirstLine, pos); // 쓰는 중인 줄은 다음에 다시 읽는다
+        File.AppendAllText(jsonl, "lled\",\"runId\":\"r2\"}\r\n");
+        Assert.False(RunCancel.ScanForCancel(jsonl, ref pos, "r1")); // 다른 실행의 기록
+        File.AppendAllText(jsonl, "{\"kind\":\"X\",\"event\":\"cancelled\",\"runId\":\"r1\"}\r\n");
+        Assert.True(RunCancel.ScanForCancel(jsonl, ref pos, "r1"));
+        Assert.Equal(new FileInfo(jsonl).Length, pos);
+    }
+
+    [Fact]
+    public void ScanForCancel_LogShrunkOrMissing()
+    {
+        Directory.CreateDirectory(_dir);
+        string jsonl = Path.Combine(_dir, "Book.jsonl");
+        long pos = 1_000_000;
+        Assert.False(RunCancel.ScanForCancel(jsonl, ref pos, "r1"));
+        File.WriteAllText(jsonl, "{\"kind\":\"X\",\"event\":\"cancelled\",\"runId\":\"r1\"}\n");
+        Assert.True(RunCancel.ScanForCancel(jsonl, ref pos, "r1")); // Reset이 잘라냈다 - 처음부터
     }
 
     // ---- 막는 대화상자 ----

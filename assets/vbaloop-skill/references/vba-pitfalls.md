@@ -32,7 +32,9 @@ report additions with `vbaloop bugreport` or a GitHub issue (https://github.com/
   forbidden on headless execution paths - the run fails once the dialog has stayed up 5 s, and Excel is quarantined unless it is an ephemeral one with only the session workbook (follow SKILL.md's disposable-session recovery rule). Inject paths as arguments/constants.
 - **Cancel stops only at LogShim calls**: a cancelled run ends with `End` at the next `LogD`/`LogJ`/`LogEvent`/`AssertEq`/`Poll`.
   A long loop that logs nothing cannot be cancelled cleanly - call `LogShim.Poll` in it. `End` resets module-level
-  variables and skips the macro's cleanup code.
+  variables and skips the macro's cleanup code (also after a runtime error). The runner restores Application
+  EnableEvents/Calculation/StatusBar/Interactive/Cursor and, in an ephemeral session, closes new or unchanged workbooks the
+  macro left open; sheet data written half-way stays, so write test setup that rebuilds its fixtures every time.
 
 ## 2. VBA language traps (cross-language intuition betrayed)
 

@@ -149,6 +149,8 @@ internal static class RunnerSupervisor
             var sw = Stopwatch.StartNew();
             long cancelAt = -1, nextProgress = ProgressIntervalMs;
             long logLen = SafeLength(jsonl), lastGrowth = 0;
+            long cancelScan = logLen; // 이 실행이 쓴 기록부터 취소 레코드를 찾는다
+            bool macroStopped = false;
             while (!proc.WaitForExit(250))
             {
                 long now = sw.ElapsedMilliseconds;
@@ -164,29 +166,19 @@ internal static class RunnerSupervisor
                 {
                     cancelAt = now;
                     RunCancel.Request(cancelFlag);
-                    bool? supported = RunLock.Load(RunLock.RecordPath(cfg))?.CancelSupported;
-                    log.Write("warn", "run_cancel_requested", new { command = commandName, runId, reason = cancelReason, supported });
-                    if (supported == false)
-                    {
-                        abortKind = "cancel";
-                        abortReason = $"{cancelReason}; the project's LogShim cannot be cancelled (it predates BeginRun - run vbaloop init)";
-                    }
-                    else
-                    {
-                        Console.Error.WriteLine($"vbaloop: {cancelReason} - asking the macro to stop at its next LogShim call "
-                            + $"(waiting up to {RunnerMain.CancelGraceMs / 1000}s" + (presses > 0 ? ", Ctrl+C again forces it)" : ")"));
-                    }
+                    log.Write("warn", "run_cancel_requested", new { command = commandName, runId, reason = cancelReason });
+                    Console.Error.WriteLine($"vbaloop: {cancelReason} - asking the macro to stop at its next LogShim call "
+                        + $"(waiting up to {RunnerMain.CancelGraceMs / 1000}s" + (presses > 0 ? ", Ctrl+C again forces it)" : ")"));
                 }
                 if (abortReason == null && cancelAt >= 0)
                 {
-                    // 첫 BeginRun 전에 온 취소는 지원 여부를 몰랐다 - 유예 동안 다시 읽는다
-                    bool unsupported = RunLock.Load(RunLock.RecordPath(cfg))?.CancelSupported == false;
-                    if (unsupported)
+                    if (!macroStopped && RunCancel.ScanForCancel(jsonl, ref cancelScan, runId))
                     {
-                        abortKind = "cancel";
-                        abortReason = $"{cancelReason}; the project's LogShim cannot be cancelled (it predates BeginRun - run vbaloop init)";
+                        // 매크로는 멈췄다 - 러너의 뒷정리(§14.8, 계산 모드 복원의 재계산 등)와 결과 출력에 유예를 새로 준다
+                        macroStopped = true;
+                        cancelAt = now;
                     }
-                    else if (presses > 1)
+                    if (presses > 1)
                     {
                         abortKind = "cancel";
                         abortReason = $"{cancelReason}; forced by a second Ctrl+C";
@@ -194,7 +186,9 @@ internal static class RunnerSupervisor
                     else if (now - cancelAt >= RunnerMain.CancelGraceMs)
                     {
                         abortKind = "cancel";
-                        abortReason = $"{cancelReason}; the macro did not stop at a LogShim check point within {RunnerMain.CancelGraceMs / 1000}s";
+                        abortReason = macroStopped
+                            ? $"{cancelReason}; the macro stopped at a LogShim check point but the runner did not finish within {RunnerMain.CancelGraceMs / 1000}s after it"
+                            : $"{cancelReason}; the macro did not stop at a LogShim check point within {RunnerMain.CancelGraceMs / 1000}s";
                     }
                 }
                 // 기록이 계속 늘면 막힌 게 아니다(Activate에서 일하는 모달 진행 폼 등)

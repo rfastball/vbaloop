@@ -237,7 +237,7 @@ JSON/VBA는 생성 입력이며 push 지문에는 생성된 frm/frx만 포함된
 5. 폼 왕복과 코드비하인드의 한글 주석이 보존된다
 6. 세션 수명주기(멱등 start, stale·poison 판정)
 7. test의 런타임·컴파일 오류 대화상자 처리, 실행 취소(§14.7 E2E: 협조적 취소·유예 뒤 강제 경로·막는 대화상자·
-   Ctrl+C 1·2회·부모 사망·실행 잠금 거부·구 LogShim 폴백·test 모드 취소)
+   Ctrl+C 1·2회·부모 사망·실행 잠금 거부·구 LogShim 거절·test 모드 취소·중단된 매크로 뒷정리)
 8. 일회용 모드: 명령 후 EXCEL 프로세스·메타 잔존 0, 타임아웃 후 정리, 하드 kill 잔재의 다음 명령 sweep,
    명시 세션 채택, persistent 회귀
 9. push 컴파일 게이트: 컴파일 오류면 저장 안 함(디스크 무변경), `--skip-compile` 통과, 정상 코드 `compiled`
@@ -695,10 +695,13 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 구현: 러너가 실행(test는 테스트마다) 직전에 `'<wb>'!LogShim.BeginRun runId`를 부른다. 확인 지점은 `LogD`·`LogJ`
   (`LogEvent` 포함)·`AssertEq`·`Poll`이고, 취소 기록은 `{"kind":"X","event":"cancelled","runId":..}`다. 러너는
   호출 구간에 이 runId의 기록이 있으면 `cancelled`로 판정한다(run: `result: "cancelled"`, test: 그 테스트와 남은
-  테스트는 skipped, 루트 `cancelled: true`). `BeginRun`이 없는 구 LogShim은 `Application.Run`이 대화상자 없이
-  오류를 내므로 `run-active.json`에 `cancelSupported: false`를 남기고, 부모는 유예 없이 강제 경로로 간다.
+  테스트는 skipped, 루트 `cancelled: true`).
+- 구 LogShim과의 하위 호환은 두지 않는다. 러너는 실행 전에 워크북의 `LogShim` 모듈 본문에 `Public Sub BeginRun`이
+  있는지 보고, 없으면(모듈 없음 포함) `vbaloop init` 후 push하라는 오류로 거절한다(exit 2). 취소할 수 없는 실행은
+  Ctrl+C·`--timeout`이 곧바로 격리로 가므로 실행 자체를 막는 편이 낫다.
 - `End`는 매크로의 정리 코드도 건너뛴다. 실측(2026-11-03): `Workbooks.Add` 뒤 취소된 매크로는 `wb.Close`에 닿지
-  못했고, 일회용 정리가 남은 `통합 문서1`을 보고 Excel을 사용자에게 넘겼다(`ephemeral_handed_over`, 기존 보호 규칙).
+  못했고, 일회용 정리가 남은 `통합 문서1`을 보고 Excel을 사용자에게 넘겼다(`ephemeral_handed_over`). §14.8이 이를
+  다룬다.
 
 ### 14.5 취소를 일으키는 것 (구현됨)
 실행할 때 넘기는 시간 예산을 기본으로 두지 않는다. `run`/`test`는 매크로가 끝날 때까지 기다린다.
@@ -713,7 +716,9 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 구현(`RunnerSupervisor`): 250ms마다 러너 종료·취소 계기·대화상자를 본다. 취소 계기는 Ctrl+C(첫 번째), 선택
   `--timeout`, `[run] maxSeconds`(기본 3600) 중 먼저 오는 것이다. 계기가 오면 표시 파일을 쓰고 30초(`CancelGraceMs`)
   기다린다. 그 안에 러너가 돌아오면 정상 결과(cancelled)를, 아니면 강제 경로(러너 kill → poisoned → §11/§14.3)를
-  탄다. 두 번째 Ctrl+C와 `cancelSupported: false`는 유예 없이 강제 경로다. 콘솔 Ctrl+C는 같은 콘솔의 러너에도
+  탄다. 유예 중에 이 runId의 LogShim 취소 기록이 보이면(매크로는 멈췄다) 유예를 그 시점부터 다시 30초 준다 — 러너의
+  뒷정리(§14.8, 계산 모드 복원의 재계산 등)가 성공한 취소를 강제 경로로 바꾸지 않게. 러너의 부모 감시도 같은 이유로
+  취소 기록이 있으면 한 번 더 기다린다. 두 번째 Ctrl+C는 유예 없이 강제 경로다. 콘솔 Ctrl+C는 같은 콘솔의 러너에도
   가므로 러너도 `CancelKeyPress`를 막고 표시 파일을 쓴다.
 - 막는 대화상자 판정(`ModalHunter.FindBlockingDialogs` + `BlockingDialogTracker`): 워크북 XLMAIN 중 하나라도
   비활성이면 그 프로세스의 최상위 `#32770`·`NUIDialog`·`ThunderDFrame` 중 VBE 오류 창이 아닌 것을 후보로 보고,
@@ -730,9 +735,9 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 러너가 실행 동안 프로젝트 실행 잠금을 쥔다(부모 사망과 무관하게 매크로가 끝날 때까지 유지).
 - 다른 명령은 이 잠금을 보면 "실행 중인 run 있음"으로 거부하고 runId·경과 시간·진행 기록을 함께 보여 준다.
 - 구현(`RunLock`): 커널 뮤텍스 `Local\vbaloop-run-<프로젝트 키>`와 기록 `_dbg\run-active.json`(runId·명령·대상·
-  러너 PID+시작 시각·Excel PID·표시 파일·`cancelSupported`). 명령 잠금을 쥔 뒤 실행 잠금을 확인한다. 러너가 죽으면
+  러너 PID+시작 시각·Excel PID·표시 파일·LogShim 기록 파일). 명령 잠금을 쥔 뒤 실행 잠금을 확인한다. 러너가 죽으면
   뮤텍스는 버려진 상태(= 비어 있음)가 된다. 러너 없이 남은 기록(부모·러너 트리 kill)은 다음 명령이 그 실행의 표시
-  파일을 쓰고, 매크로가 멈췄다는 근거(이 runId의 취소 기록, Excel 소멸, `cancelSupported: false`)가 나오거나
+  파일을 쓰고, 매크로가 멈췄다는 근거(이 runId의 취소 기록, Excel 소멸)가 나오거나
   30초(`OrphanWaitMs`)가 지날 때까지 exit 3으로 거부한다. 그 뒤 기록을 지우고 평소의 세션 복구에 맡긴다.
   격리 해제·session stop·격리 자동 해제는 남은 표시 파일을 모두 지운다(강제 경로 뒤 LogShim에 남은 runId가 사용자가
   계속 쓰는 Excel의 매크로를 End하지 않게).
@@ -754,4 +759,35 @@ E2E(2026-11-03, 일회용 세션, 60초 기록 루프 기준):
 - Ctrl+C 1회: 기록 루프는 곧바로 `cancelled`, 호출 없는 루프는 유예 뒤 강제. 2회: 즉시 강제.
 - 부모만 kill: 러너가 1초 안에 취소, 그 사이 다른 명령은 실행 잠금으로 거부(exit 3), 다음 명령은 정상.
 - test `--timeout 8`: pass 2, 실행 중 테스트 skipped(cancelled while running), 남은 테스트 skipped.
-- 구 LogShim: 강제 경로로 바로 감(대화상자 없음). 두 번째 워크북이 열린 경우는 창 제목과 함께 격리(§14.3 회귀).
+- 두 번째 워크북이 열린 경우는 창 제목과 함께 격리(§14.3 회귀).
+
+E2E(2026-11-04, 일회용 세션):
+- `BeginRun`을 지운 LogShim: run·test 모두 실행 전에 `LogShim predates cancel support` + init/push 안내로 거절.
+- test: 설정 5종을 바꾸고 새 문서를 연 뒤 런타임 오류로 끝난 테스트 → 다섯 설정 복원·문서 닫힘, 다음 테스트가 실행
+  전 상태와 같음을 단언해 통과. 같은 일을 한 뒤 `--timeout`으로 취소된 테스트도 같다.
+- run: 같은 매크로를 `--timeout 5`로 취소, 런타임 오류로 실패 → 둘 다 복원·문서 닫힘 뒤 일회용 Excel이 정상 종료.
+  §14.4의 `Workbooks.Add` 뒤 취소 사례는 이제 넘기지 않고 닫는다.
+- 유지 세션: 복원은 같고 문서는 닫지 않고 `left open`으로 보고한다. 정상 완료한 테스트가 남긴 문서는 뒷정리 대상이
+  아니라 기존 규칙대로 넘긴다.
+
+### 14.8 중단된 매크로 뒷정리 (구현됨)
+취소와 런타임 오류(워치독이 [종료]로 해제)는 VBA `End`와 같다. 매크로의 정리 코드·`Class_Terminate`가 돌지 않아 세션
+Excel에 상태가 남고, 같은 Excel을 쓰는 다음 테스트나 유지 세션의 다음 명령이 그 상태를 물려받는다.
+- 러너가 매크로·테스트마다 호출 직전에 상태를 찍는다(`AppStateGuard.Take`): `EnableEvents`·`Calculation`·
+  `StatusBar`·`Interactive`·`Cursor`와 열린 통합 문서 목록. `ScreenUpdating`·`DisplayAlerts`·`EnableCancelKey`는
+  매크로가 끝나면 Excel이 되돌린다고 문서화돼 있어 뺀다(실측하지 않음).
+- 결과가 취소·런타임 오류·모달 해제일 때만 되돌린다. 정상 완료한 매크로가 바꾼 설정은 의도로 보고 둔다. 세션이
+  죽었으면 하지 않는다.
+- 바뀐 설정은 실행 전 값으로 되돌린다. 이벤트는 끈 채로 되돌리고 `EnableEvents`는 마지막에 원래 값으로 둔다 — 계산 모드
+  복원의 재계산이나 문서 닫기가 이벤트 코드(MsgBox 등)를 불러 뒷정리 호출을 막지 않게.
+- 실행 뒤 새로 보이는 통합 문서는 일회용 세션이면 저장 없이 닫는다(세션 종료가 모르는 문서로 보고 Excel을 넘기지 않게).
+  닫는 것은 잃을 것이 없는 문서뿐이다: 경로가 없는 새 문서, 또는 저장할 변경이 없는 문서. 경로가 있고 변경이 남은
+  문서(매크로가 열어 고친 파일, 그 사이 사용자가 연 파일)와 SaveAs로 이름이 바뀐 세션 워크북(COM 개체 동일성으로
+  가린다)은 닫지 않는다. 유지·attach 세션에서는 닫지 않고 보고만 한다.
+- 결과는 run의 `payload.run.aftermath`, test의 각 테스트 `aftermath`(`restored`·`closed`·`leftOpen`·`failed`·
+  `summary`)와 사람용 한 줄(`Cleanup after the interrupted macro: ...`, `NOTE <테스트> was interrupted: ...`)이다.
+  뒷정리 실패는 판정을 바꾸지 않는다.
+- 실측(2026-11-04): 한 번이라도 문구를 쓴 뒤 `StatusBar = False`로 돌려주면 Excel은 Boolean이 아니라 문자열
+  `"FALSE"`를 돌려준다(VBA에서도 같다). 스냅숏은 이를 "Excel이 쥔 상태"로 본다.
+- 다루지 않는 것: 반쯤 쓴 시트 데이터, 매크로가 닫은 기존 문서, `CreateObject`로 띄운 외부 앱, 임시 파일. 테스트는
+  셋업을 멱등하게(있으면 지우고 다시 만들기) 짜서 정리 코드에 기대지 않는다.

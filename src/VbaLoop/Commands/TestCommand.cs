@@ -94,6 +94,9 @@ public static class TestCommand
                 ? d.GetString() : null;
             if (result == "fail")
                 o.HumanLines.Add($"  FAIL {name}" + (detail != null ? $" — {detail}" : ""));
+            if (t.TryGetProperty("aftermath", out var am) && am.ValueKind == JsonValueKind.Object
+                && am.TryGetProperty("summary", out var ams))
+                o.HumanLines.Add($"  NOTE {name} was interrupted: {ams.GetString()}");
         }
         if (skipped > 0)
             o.HumanLines.Add(cancelled

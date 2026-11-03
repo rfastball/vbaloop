@@ -71,6 +71,33 @@ public static class RunCancel
         return false;
     }
 
+    /// <summary>pos부터 완성된 줄만 읽어 이 runId의 취소 레코드를 찾고, pos를 마지막 완성 줄 뒤로 옮긴다. 부모가 유예 동안
+    /// 반복 호출해 매크로가 멈췄는지 본다(멈췄으면 남은 시간은 러너의 뒷정리 몫이다). 파일이 pos보다 짧으면(Reset) 처음부터.</summary>
+    public static bool ScanForCancel(string jsonlPath, ref long pos, string runId)
+    {
+        try
+        {
+            if (!File.Exists(jsonlPath)) return false;
+            using var fs = new FileStream(jsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length < pos) pos = 0;
+            if (fs.Length == pos) return false;
+            fs.Seek(pos, SeekOrigin.Begin);
+            var buf = new byte[fs.Length - pos];
+            int read = 0, n;
+            while (read < buf.Length && (n = fs.Read(buf, read, buf.Length - read)) > 0) read += n;
+            if (read == 0) return false;
+            int lastNewline = Array.LastIndexOf(buf, (byte)'\n', read - 1);
+            if (lastNewline < 0) return false; // 아직 쓰는 중인 줄 - 다음에 다시 읽는다
+            string text = new UTF8Encoding(false).GetString(buf, 0, lastNewline + 1);
+            pos += lastNewline + 1;
+            return text.Split('\n').Any(line => IsCancelRecord(line, runId));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool IsCancelRecord(string line, string runId)
     {
         line = line.Trim();
@@ -88,6 +115,11 @@ public static class RunCancel
             return false;
         }
     }
+
+    /// <summary>LogShim 모듈 본문이 협조적 취소를 받는가(Public Sub BeginRun 선언). 없는 구버전은 test/run이 거절한다.</summary>
+    public static bool ShimSupportsCancel(string logShimBody)
+        => System.Text.RegularExpressions.Regex.IsMatch(logShimBody, @"^[ \t]*Public[ \t]+Sub[ \t]+BeginRun[ \t]*\(",
+            System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>하루 넘은 잔재 표시 파일을 지운다(runId가 달라 무해하지만 쌓이지 않게).</summary>
     public static void SweepOld(string dbgDir, TimeSpan age)
@@ -118,9 +150,6 @@ public sealed class ActiveRun
     [JsonPropertyName("jsonl")] public string Jsonl { get; set; } = "";
     /// <summary>러너 없이 남은 기록에 다음 명령이 취소를 요청한 시각(고아 취소 대기의 기준).</summary>
     [JsonPropertyName("orphanCancelUtc")] public string? OrphanCancelUtc { get; set; }
-    /// <summary>프로젝트 LogShim이 BeginRun을 받았는가(null = 아직 모름). false면 협조적 취소가 불가능하니
-    /// 부모는 유예 없이 강제 경로로 간다(BeginRun이 없는 구버전 LogShim).</summary>
-    [JsonPropertyName("cancelSupported")] public bool? CancelSupported { get; set; }
 
     public string Describe(DateTime nowUtc)
     {
@@ -177,12 +206,6 @@ public sealed class RunLock : IDisposable
         }
         catch { /* 기록 실패 — 잠금만으로도 거부는 동작한다 */ }
         return new RunLock(mutex, path, record.RunId);
-    }
-
-    public void Update(ActiveRun record)
-    {
-        try { File.WriteAllText(_recordPath, JsonSerializer.Serialize(record, Json)); }
-        catch { /* 기록 실패 - 부모는 유예 뒤 강제 경로로 간다 */ }
     }
 
     public void Dispose()
@@ -281,9 +304,8 @@ public sealed class RunLock : IDisposable
         bool gone = !ProcessAlive(rec.ExcelPid)
             || (rec.Jsonl.Length > 0 && SafeSpanCancelled(rec.Jsonl, rec.RunId));
         if (gone && rec.CancelFlag.Length > 0) RunCancel.Clear(rec.CancelFlag); // 멈출 매크로가 없다
-        bool stopped = gone || rec.CancelSupported == false; // false: 멈출 수단이 없다 - 기다려도 소용없다
         double waited = (now - since).TotalMilliseconds;
-        if (stopped || waited >= OrphanWaitMs)
+        if (gone || waited >= OrphanWaitMs)
         {
             try { File.Delete(path); } catch { /* 다음 명령이 재시도 */ }
             return;

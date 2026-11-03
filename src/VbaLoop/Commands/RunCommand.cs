@@ -97,6 +97,9 @@ public static class RunCommand
                          (returnType != "Empty" ? $" → {returnValue} ({returnType})" : ""));
         if (failedAsserts > 0)
             o.HumanLines.Add($"Note: {failedAsserts} failed assertion(s) in range (unrelated to run success, see payload.run)");
+        if (run.TryGetProperty("aftermath", out var am) && am.ValueKind == JsonValueKind.Object
+            && am.TryGetProperty("summary", out var ams))
+            o.HumanLines.Add($"Cleanup after the interrupted macro: {ams.GetString()} (payload.run.aftermath)");
 
         if (sup.SessionDiedAfterModal)
             o.HumanLines.Add(sup.DeathWarning);
