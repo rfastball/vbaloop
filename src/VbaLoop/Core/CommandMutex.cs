@@ -36,7 +36,18 @@ public sealed class CommandMutex : IDisposable
             throw new CliError("Another vbaloop command is running in this project",
                 "Retry after that command finishes (concurrent runs would interleave on the same Excel session)");
         }
-        return new CommandMutex(mutex);
+        var cm = new CommandMutex(mutex);
+        try
+        {
+            // 부모가 죽어도 러너는 매크로가 끝날 때까지 실행 잠금을 쥔다(설계 §14.6)
+            RunLock.ThrowIfActive(cfg);
+        }
+        catch
+        {
+            cm.Dispose();
+            throw;
+        }
+        return cm;
     }
 
     public void Dispose()
@@ -45,7 +56,7 @@ public sealed class CommandMutex : IDisposable
         _mutex.Dispose();
     }
 
-    private static string KeyFor(string rootDir)
+    internal static string KeyFor(string rootDir)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rootDir.ToLowerInvariant()));
         return Convert.ToHexString(bytes)[..16];

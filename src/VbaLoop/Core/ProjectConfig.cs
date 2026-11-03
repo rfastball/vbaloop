@@ -38,6 +38,12 @@ public sealed class ProjectConfig
     /// <summary>저장 전 VBE 컴파일 게이트. 일회용 인스턴스에서만 동작한다. --skip-compile로 1회 생략.</summary>
     public bool PushCompile { get; init; } = true;
 
+    // ---- [run] (설계 §14.5, 선택) ----
+    /// <summary>run/test 안전 상한(초). 추정값이 아니라 아무도 취소하지 않는 버려진 실행의 정리용 —
+    /// 호출마다 넘기는 예산은 없다(--timeout은 선택).</summary>
+    public int RunMaxSeconds { get; init; } = DefaultRunMaxSeconds;
+    public const int DefaultRunMaxSeconds = 3600;
+
     public string DbgDir => Path.Combine(RootDir, "_dbg");
     public string SessionMetaPath => Path.Combine(DbgDir, "session.json");
     public string ToolLogPath => Path.Combine(DbgDir, "vbaloop.jsonl");
@@ -58,7 +64,7 @@ public sealed class ProjectConfig
     public static Action<ProjectConfig>? Loaded { get; set; }
 
     private static readonly HashSet<string> KnownSections = new(StringComparer.OrdinalIgnoreCase)
-        { "project", "excel", "src", "dist", "backup", "push", ManagedStamp.Section };
+        { "project", "excel", "src", "dist", "backup", "push", "run", ManagedStamp.Section };
     private static readonly Dictionary<string, HashSet<string>> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         ["project"] = new(StringComparer.OrdinalIgnoreCase) { "name" },
@@ -67,6 +73,7 @@ public sealed class ProjectConfig
         ["dist"] = new(StringComparer.OrdinalIgnoreCase) { "version", "exclude", "bootstrap", "stripcomments" },
         ["backup"] = new(StringComparer.OrdinalIgnoreCase) { "keep" },
         ["push"] = new(StringComparer.OrdinalIgnoreCase) { "compile" },
+        ["run"] = new(StringComparer.OrdinalIgnoreCase) { "maxseconds" },
         // [vbaloop]은 도구 소유 섹션 — 미지 키를 거부하지 않는다(미래 exe가 키를 늘려도 이 exe가
         // 스탬프 비교까지는 도달해 "exe가 오래됨"을 말할 수 있게).
         [ManagedStamp.Section] = new(StringComparer.OrdinalIgnoreCase) { ManagedStamp.Key },
@@ -108,7 +115,7 @@ public sealed class ProjectConfig
             {
                 if (!KnownSections.Contains(section))
                     throw new CliError($"{tomlPath}: unknown section [{section}]",
-                        "supported sections: [project], [excel], [src], [dist], [backup], [push], [vbaloop]");
+                        "supported sections: [project], [excel], [src], [dist], [backup], [push], [run], [vbaloop]");
                 if (string.Equals(section, ManagedStamp.Section, StringComparison.OrdinalIgnoreCase))
                     continue;
                 foreach (var key in doc[section].Keys)
@@ -137,6 +144,7 @@ public sealed class ProjectConfig
         int backupKeep = GetBackupKeep(doc, tomlPath);
         var sessionMode = GetSessionMode(doc, tomlPath);
         bool pushCompile = GetStrictBool(doc, "push", "compile", tomlPath) ?? true;
+        int runMax = GetRunMaxSeconds(doc, tomlPath);
 
         var cfg = new ProjectConfig
         {
@@ -153,6 +161,7 @@ public sealed class ProjectConfig
             DistStripComments = GetBool(doc, "dist", "stripComments") ?? false,
             BackupKeep = backupKeep,
             PushCompile = pushCompile,
+            RunMaxSeconds = runMax,
             ManagedBy = GetString(doc, ManagedStamp.Section, ManagedStamp.Key),
         };
         Loaded?.Invoke(cfg);
@@ -177,6 +186,17 @@ public sealed class ProjectConfig
         if (keep < 0)
             throw new CliError($"{tomlPath}: [backup].keep must be >= 0 (currently {keep})", "keep = 10 (0 disables the pre-push backup)");
         return keep;
+    }
+
+    /// <summary>[run] maxSeconds: 1 이상 정수만. 오타·문자열을 기본값으로 떨어뜨리지 않는다.</summary>
+    private static int GetRunMaxSeconds(Dictionary<string, Dictionary<string, object>> doc, string tomlPath)
+    {
+        if (!doc.TryGetValue("run", out var s) || !s.TryGetValue("maxSeconds", out var v))
+            return DefaultRunMaxSeconds;
+        if (v is not int max || max < 1)
+            throw new CliError($"{tomlPath}: [run].maxSeconds must be an integer >= 1",
+                $"maxSeconds = {DefaultRunMaxSeconds} (safety cap for abandoned runs; there is no per-call budget)");
+        return max;
     }
 
     /// <summary>[excel].session: "ephemeral" | "persistent". 오타를 조용히 기본값으로 떨어뜨리지 않는다.</summary>

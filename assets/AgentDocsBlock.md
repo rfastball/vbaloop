@@ -17,7 +17,8 @@ Write project-specific content outside this managed block (init overwrites the i
    [excel] session). If a session opened with session start/attach is alive, it is used
 3. Inject: vbaloop push (src -> in-place injection into the workbook -> saved only if the VBE compile passes; supports --prune/--force.
    Backup to _dbg\backups\ right before injecting)
-4. Run: vbaloop test (runs every Test_* + reads the LogShim jsonl, --timeout <seconds>)
+4. Run: vbaloop test (runs every Test_* + reads the LogShim jsonl; waits until done, no default time limit -
+   run long ones in the background and stop the command to cancel at the next LogShim call)
 5. Fix: on fail, fix the cause and go back to 1; when green you are done (commit now if you use version control)
 6. Release: when the task is finished (green and reported, or you stop working on this project), run `vbaloop lease release`.
    Commands take the project lease automatically and nothing else frees it while your session stays open,

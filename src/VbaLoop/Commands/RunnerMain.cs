@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using VbaLoop.Cli;
@@ -10,7 +11,9 @@ namespace VbaLoop.Commands;
 /// vbaloop __runner — test의 자식 러너 프로세스(설계 §4 test).
 /// Application.Run은 블로킹 COM 호출이라 인프로세스 타임아웃이 불가능하므로,
 /// 부모가 벽시계 타임아웃을 감시하고 이 프로세스는 스스로 재attach해 테스트를 순차 실행한다.
-/// 출력: stdout에 JSON 한 덩어리. exit 0=실행 완료(실패 포함), 3=poison, 4=셋업 실패.
+/// 출력: stdout에 JSON 한 덩어리. exit 0=실행 완료(실패·취소 포함), 3=poison, 4=셋업 실패.
+/// 실행 동안 프로젝트 실행 잠금을 쥐고(설계 §14.6), LogShim.BeginRun으로 runId를 알려 협조적 취소를 받는다(§14.4).
+/// 부모가 사라지면 취소를 요청하고, 유예 안에 멈추지 않으면 격리 규칙으로 정리한 뒤 끝낸다(§14.5).
 /// </summary>
 public static class RunnerMain
 {
@@ -18,6 +21,9 @@ public static class RunnerMain
     {
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
+
+    /// <summary>취소 요청 뒤 매크로가 LogShim 확인 지점에 닿기를 기다리는 시간(부모·러너 공통).</summary>
+    public const int CancelGraceMs = 30_000;
 
     public static int Run(CliArgs opts)
     {
@@ -39,10 +45,37 @@ public static class RunnerMain
 
     private static int Execute(CliArgs opts)
     {
+        // 콘솔 Ctrl+C는 부모와 러너에 함께 온다 - 러너는 죽지 않고 취소만 요청한다(부모가 결과를 기다린다).
+        // 세션 확보 전에 걸어 둔다: 시작 중의 Ctrl+C도 죽지 않고 실행 전 취소로 처리한다.
+        string? flagForCtrlC = null;
+        int ctrlC = 0;
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            Interlocked.Exchange(ref ctrlC, 1);
+            if (Volatile.Read(ref flagForCtrlC) is string f) RunCancel.Request(f);
+        };
         var cfg = ProjectConfig.Load(opts.Config, Environment.CurrentDirectory);
         string runId = opts.RunId ?? Guid.NewGuid().ToString("N");
-        var (app, meta) = SessionService.AcquireOrThrow(cfg, opts.Macro != null ? "run" : "test", null, opts.SessionMeta);
+        string command = opts.Macro != null ? "run" : "test";
+        var (app, meta) = SessionService.AcquireOrThrow(cfg, command, null, opts.SessionMeta);
         var filter = OleMessageFilter.Register();
+        string cancelFlag = RunCancel.PathFor(meta.WorkbookFullName, runId);
+        RunCancel.SweepOld(Path.GetDirectoryName(cancelFlag)!, TimeSpan.FromDays(1));
+        var active = new ActiveRun
+        {
+            RunId = runId, Command = command, Target = opts.Macro ?? "Test_*",
+            RunnerPid = Environment.ProcessId, RunnerStart = ProcessIdentity.GetStartTimeIso(Environment.ProcessId) ?? "",
+            ExcelPid = meta.Pid, StartedUtc = DateTime.UtcNow.ToString("O"), CancelFlag = cancelFlag,
+            Jsonl = Path.Combine(Path.GetDirectoryName(meta.WorkbookFullName)!, "_dbg",
+                Path.GetFileNameWithoutExtension(meta.WorkbookFullName) + ".jsonl"),
+        };
+        using var runLock = RunLock.Hold(cfg, active);
+        Volatile.Write(ref flagForCtrlC, cancelFlag);
+        if (Volatile.Read(ref ctrlC) != 0) RunCancel.Request(cancelFlag);
+        using var mainDone = new ManualResetEventSlim(false);
+        var watchState = new StrongBox<int>(0); // 0 실행 중, 1 본 스레드 완료, 2 감시 스레드가 정리를 맡음
+        StartParentWatch(opts.ParentPid, cancelFlag, mainDone, watchState, cfg, meta, command, runId);
         try
         {
             // 모달 워치독: 컴파일/런타임 오류 모달을 kill 없이 해제해 해당 테스트만 fail 처리.
@@ -61,9 +94,11 @@ public static class RunnerMain
             string jsonlPath = Path.Combine(wbDir, "_dbg",
                 Path.GetFileNameWithoutExtension(meta.WorkbookFullName) + ".jsonl");
 
+            var cancel = new CancelState(runId, runLock, active, cancelFlag);
+
             // --macro: 테스트 열거 대신 단건 매크로 실행 (run 명령의 자식 모드)
             if (opts.Macro != null)
-                return RunMacro(opts.Macro, runId, cfg, app, meta, watchdog, exitWatch, watchdogEvents, wbName, jsonlPath);
+                return RunMacro(opts.Macro, runId, cfg, app, meta, watchdog, exitWatch, watchdogEvents, wbName, jsonlPath, cancel);
 
             var testList = new List<(string Module, string Sub)>();
             List<VbaProjectOps.ComponentInfo> comps = VbaProjectOps.ListComponents(proj);
@@ -82,6 +117,7 @@ public static class RunnerMain
             // 이전 테스트 drain에 소비된 경우에도 유효해야 함)
             bool vbeCloseHappened = false;
             bool sessionDied = false;
+            bool cancelled = false;
             ExcelExitKind excelExit = ExcelExitKind.Alive; // 프로세스 소멸(크래시/종료) — 모달 사망과 구분
             int next = 0; // 다음 미처리 테스트 인덱스 (사망 중단 시 잔여 skipped 채우기용)
 
@@ -89,6 +125,13 @@ public static class RunnerMain
             {
                 var (module, sub) = testList[next];
                 string full = $"{module}.{sub}";
+                if (File.Exists(cancelFlag))
+                {
+                    cancelled = true; // 테스트 사이에 온 취소 - 남은 테스트는 아래에서 skipped
+                    break;
+                }
+                // 테스트의 End·런타임 오류 End는 LogShim의 runId까지 지운다 - 매 테스트 전에 다시 알린다
+                cancel.Begin(app, wbName);
                 AppendMarker(jsonlPath, "test_start", full, runId, null);
                 long offset = File.Exists(jsonlPath) ? new FileInfo(jsonlPath).Length : 0;
 
@@ -184,6 +227,13 @@ public static class RunnerMain
                     ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
                     : null;
                 var (result, detail) = RunnerVerdict.Decide(error, failedAsserts, modalDetail, deadNow, crashDetail);
+                if (!deadNow && SpanCancelled(jsonlPath, offset, runId))
+                {
+                    // LogShim이 End로 멈췄다 - 오류(0x800A9C68)는 취소의 흔적이지 테스트 실패가 아니다
+                    cancelled = true;
+                    result = RunnerVerdict.Skipped;
+                    detail = "cancelled while running (stopped at a LogShim check point)";
+                }
                 if (result == RunnerVerdict.Pass) pass++;
                 else if (result == RunnerVerdict.Fail) fail++;
                 else skipped++;
@@ -196,16 +246,22 @@ public static class RunnerMain
                     next++;
                     break;
                 }
+                if (cancelled)
+                {
+                    next++;
+                    break;
+                }
             }
 
-            // 사망 중단 시 잔여 테스트는 skipped로 채움 — 죽은 세션에 던져 오탐을 쌓지 않는다
-            for (; sessionDied && next < testList.Count; next++)
+            // 사망·취소 중단 시 잔여 테스트는 skipped로 채움 — 죽은 세션에 던져 오탐을 쌓지 않는다
+            for (; (sessionDied || cancelled) && next < testList.Count; next++)
             {
                 var (module, sub) = testList[next];
                 skipped++;
                 tests.Add(new
                 {
-                    name = sub, module, result = RunnerVerdict.Skipped, detail = "not run because the session ended",
+                    name = sub, module, result = RunnerVerdict.Skipped,
+                    detail = sessionDied ? "not run because the session ended" : "not run because the run was cancelled",
                 });
             }
 
@@ -227,6 +283,8 @@ public static class RunnerMain
                 ok = true,
                 poison = false,
                 sessionDied,
+                cancelled,
+                cancelSupported = cancel.Supported,
                 excelExit = ExitName(excelExit),
                 excelExitCode = excelExit != ExcelExitKind.Alive ? exitWatch.ExitCode : null,
                 error = (string?)null,
@@ -239,9 +297,102 @@ public static class RunnerMain
         }
         finally
         {
+            // 감시 스레드가 이미 정리(poison·격리)를 맡았으면 그 스레드가 프로세스를 끝낸다 - 여기서 결과를 쓰거나
+            // 잠금을 풀며 끼어들지 않는다
+            if (Interlocked.CompareExchange(ref watchState.Value, 1, 0) == 2)
+                Thread.Sleep(Timeout.Infinite);
+            mainDone.Set();
+            RunCancel.Clear(cancelFlag);
             filter.Revoke();
         }
     }
+
+    /// <summary>협조적 취소 상태: LogShim.BeginRun 지원 여부를 실행 기록에 남겨 부모가 유예 여부를 정하게 한다.</summary>
+    private sealed class CancelState(string runId, RunLock? runLock, ActiveRun record, string flag)
+    {
+        public bool? Supported { get; private set; }
+
+        /// <summary>이미 취소가 요청됐는가(시작 중의 Ctrl+C, 부모 사망 등).</summary>
+        public bool Requested => File.Exists(flag);
+
+        /// <summary>LogShim.BeginRun 호출. 없는 구버전 LogShim(또는 LogShim 없음)이면 이후 호출하지 않는다.</summary>
+        public void Begin(dynamic app, string wbName)
+        {
+            if (Supported == false) return;
+            bool ok;
+            try
+            {
+                ComRetry.Invoke(() => { app.Run($"'{wbName}'!LogShim.BeginRun", runId); });
+                ok = true;
+            }
+            catch (Exception)
+            {
+                ok = false;
+            }
+            if (Supported != ok)
+            {
+                Supported = ok;
+                record.CancelSupported = ok;
+                runLock?.Update(record);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 부모 감시(설계 §14.5): 부모가 정리할 틈 없이 사라지면(강제 종료) 취소를 요청하고, 유예 안에 실행이 끝나지
+    /// 않으면 부모가 하던 정리(poison 기록 + 격리 규칙)를 대신하고 끝낸다 — 매크로가 끝날 때까지 잠금을 쥔 채
+    /// 아무도 결과를 읽지 않는 러너로 남지 않게.
+    /// </summary>
+    private static void StartParentWatch(int? parentPid, string cancelFlag, ManualResetEventSlim mainDone,
+        StrongBox<int> watchState, ProjectConfig cfg, SessionMeta meta, string command, string runId)
+    {
+        if (parentPid is not int ppid) return;
+        System.Diagnostics.Process? parent;
+        try { parent = System.Diagnostics.Process.GetProcessById(ppid); }
+        catch (ArgumentException) { parent = null; } // 이미 사라짐
+        var thread = new Thread(() =>
+        {
+            ToolLog? log = null;
+            try
+            {
+                parent?.WaitForExit();
+                if (mainDone.IsSet) return;
+                RunCancel.Request(cancelFlag);
+                log = new ToolLog(cfg.ToolLogPath, command);
+                log.Write("warn", "runner_parent_gone", new { parentPid = ppid, cancelFlag });
+                if (mainDone.Wait(CancelGraceMs)) return;
+            }
+            catch
+            {
+                return; // 감시 실패 - 실행은 매크로가 끝나면 정상 종료한다
+            }
+            // 본 스레드와 경합하지 않게 정리를 한쪽이 맡는다(본 스레드가 방금 끝났으면 그쪽이 정상 종료한다)
+            if (Interlocked.CompareExchange(ref watchState.Value, 2, 0) != 0) return;
+            try
+            {
+                string reason = $"{command}: the vbaloop process that started it ended and the macro did not stop at a LogShim check point";
+                meta.MarkPoisoned(reason, null);
+                var (res, _, why) = RecoveryGate.Resolve(cfg, meta, "parent_gone", reason, command, log);
+                log?.Write("error", "runner_abandoned", new { recovery = res.ToString(), why });
+                RunLock.Forget(cfg, runId);
+                if (ProcessIdentity.Identify(meta.Pid, meta.ExcelStartTime) == IdentityState.Gone)
+                    RunCancel.Clear(cancelFlag); // Excel을 정리했다 - 멈출 매크로가 없다
+            }
+            catch
+            {
+                // 정리 실패도 끝낸다 - 잠금을 쥔 채 아무도 읽지 않는 러너로 남지 않게
+            }
+            // 본 스레드가 바쁜 Excel의 COM 호출에 묶여 있다 - 정상 종료는 RCW 정리에서 멈출 수 있다
+            ComCleanup.HardExit(3);
+        }) { IsBackground = true, Name = "vbaloop-parent-watch" };
+        thread.Start();
+    }
+
+    /// <summary>offset 이후 구간에 이 runId의 LogShim 취소 레코드가 있는가(<see cref="RunCancel.SpanCancelled"/>).</summary>
+    public static bool SpanCancelled(string jsonlPath, long offset, string runId)
+        => RunCancel.SpanCancelled(jsonlPath, offset, runId);
+
+    public static bool IsCancelRecord(string line, string runId) => RunCancel.IsCancelRecord(line, runId);
 
     /// <summary>
     /// 워크북 사망 안정화 probe: VBE 닫기 해제 후 Excel 종료는 지연되므로(supervisor는 800ms
@@ -263,14 +414,17 @@ public static class RunnerMain
     /// 어서션 실패는 run의 성패를 가르지 않고 정보로만 노출(테스트가 아니므로).</summary>
     private static int RunMacro(
         string macroSpec, string runId, ProjectConfig cfg, dynamic app, SessionMeta meta,
-        ModalWatchdog watchdog, ExcelExitWatch exitWatch, List<object> watchdogEvents, string wbName, string jsonlPath)
+        ModalWatchdog watchdog, ExcelExitWatch exitWatch, List<object> watchdogEvents, string wbName, string jsonlPath,
+        CancelState cancel)
     {
         if (!MacroName.TryParse(macroSpec, out var module, out var proc, out var nameError))
             throw new CliError(nameError!, "Format: vbaloop run Module.Proc");
         string full = $"{module}.{proc}";
 
+        cancel.Begin(app, wbName);
         AppendMarker(jsonlPath, "run_start", full, runId, null);
         long offset = File.Exists(jsonlPath) ? new FileInfo(jsonlPath).Length : 0;
+        bool cancelledBeforeStart = cancel.Requested; // 시작 중에 온 취소 - 매크로를 부르지 않는다
 
         string? error = null;
         Exception? caught = null;
@@ -280,7 +434,8 @@ public static class RunnerMain
         try
         {
             // 항상 모듈 한정 호출
-            rawReturn = ComRetry.Invoke<object?>(() => app.Run($"'{wbName}'!{full}"));
+            if (!cancelledBeforeStart)
+                rawReturn = ComRetry.Invoke<object?>(() => app.Run($"'{wbName}'!{full}"));
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult) && exitWatch.ClassifyAfter(ex) != ExcelExitKind.Alive)
         {
@@ -327,13 +482,19 @@ public static class RunnerMain
 
         var (records, failedAsserts) = ReadSpan(jsonlPath, offset);
         bool modalHit = myModals.Count > 0;
-        string result = error == null && !modalHit && crashDetail == null ? "ok" : "fail";
+        // LogShim이 End로 멈춘 취소 - 오류(0x800A9C68)는 취소의 흔적이다
+        bool cancelled = cancelledBeforeStart
+            || (crashDetail == null && !modalHit && SpanCancelled(jsonlPath, offset, runId));
+        string result = cancelled ? "cancelled"
+            : error == null && !modalHit && crashDetail == null ? "ok" : "fail";
         AppendMarker(jsonlPath, "run_end", full, runId, result);
 
         string? modalDetail = modalHit
             ? $"modal auto-dismissed ({myModals[0].Dismissal}): {Truncate(myModals[0].Body, 500)}"
             : null;
-        string? detail = crashDetail != null
+        string? detail = cancelledBeforeStart ? "cancelled before the macro started"
+            : cancelled ? "cancelled at a LogShim check point (the runner asked the macro to stop)"
+            : crashDetail != null
             ? crashDetail + (modalDetail != null ? $" | {modalDetail}" : "") + (error != null ? $" | COM: {error}" : "")
             : modalDetail != null ? modalDetail + (error != null ? $" | COM: {error}" : "")
             : error != null ? $"runtime error: {error}" : null;
@@ -357,6 +518,8 @@ public static class RunnerMain
             ok = result == "ok",
             poison = false,
             sessionDied,
+            cancelled,
+            cancelSupported = cancel.Supported,
             excelExit = ExitName(excelExit),
             excelExitCode = excelExit != ExcelExitKind.Alive ? exitWatch.ExitCode : null,
             error = result == "ok" ? null : detail,
@@ -499,6 +662,13 @@ public static class RunnerMain
 
     private static void PrintResult(object result)
     {
-        Console.WriteLine(JsonSerializer.Serialize(result, Output.JsonOptions));
+        try
+        {
+            Console.WriteLine(JsonSerializer.Serialize(result, Output.JsonOptions));
+        }
+        catch (IOException)
+        {
+            // 부모가 사라져 파이프가 닫혔다 - 결과를 읽을 쪽이 없다
+        }
     }
 }

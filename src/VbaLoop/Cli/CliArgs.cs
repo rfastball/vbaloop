@@ -21,6 +21,8 @@ public sealed class CliArgs
     public int? TimeoutSec { get; private set; }
     public string? Config { get; private set; }
     public string? RunId { get; private set; }
+    /// <summary>__runner 전용: 부모 vbaloop PID. 부모가 사라지면 러너가 매크로 취소를 요청한다(설계 §14.5).</summary>
+    public int? ParentPid { get; private set; }
     /// <summary>__runner 전용: 부모가 확보한 세션의 메타 파일(session.json 또는 일회용 인스턴스 메타).</summary>
     public string? SessionMeta { get; private set; }
     /// <summary>__runner 전용: 테스트 열거 대신 단건 매크로 실행 (Module.Proc).</summary>
@@ -101,6 +103,11 @@ public sealed class CliArgs
                 case "--runid":
                     if (++i >= args.Length) throw new CliError("--runid requires a value");
                     r.RunId = args[i];
+                    break;
+                case "--parent-pid":
+                    if (++i >= args.Length || !int.TryParse(args[i], out var pp) || pp <= 0)
+                        throw new CliError("--parent-pid requires a process id");
+                    r.ParentPid = pp;
                     break;
                 case "--session-meta":
                     if (++i >= args.Length) throw new CliError("--session-meta requires a path");
@@ -194,7 +201,7 @@ public sealed class CliArgs
     /// <summary>값을 하나 받는 옵션 — 다음 토큰은 옵션 값이지 위치 인자가 아니다.</summary>
     public static readonly HashSet<string> ValueOptions = new(StringComparer.Ordinal)
     {
-        "--timeout", "--config", "--runid", "--session-meta", "--macro", "--module",
+        "--timeout", "--config", "--runid", "--parent-pid", "--session-meta", "--macro", "--module",
         "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup", "--spec", "--code", "--package",
     };
 

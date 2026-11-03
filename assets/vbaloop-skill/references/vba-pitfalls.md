@@ -29,7 +29,10 @@ report additions with `vbaloop bugreport` or a GitHub issue (https://github.com/
   Do not leave `Stop` statements in source. `Erl` returns 0 in code without line numbers.
 - **File dialogs hang too**: not just MsgBox/InputBox (see SKILL) -
   `Application.GetOpenFilename`/`GetSaveAsFilename`/`FileDialog` and `UserForm.Show` are also
-  forbidden on headless execution paths - they are only cut by the timeout and Excel is usually quarantined (follow SKILL.md's disposable-session recovery rule). Inject paths as arguments/constants.
+  forbidden on headless execution paths - the run fails once the dialog has stayed up 5 s, and Excel is quarantined unless it is an ephemeral one with only the session workbook (follow SKILL.md's disposable-session recovery rule). Inject paths as arguments/constants.
+- **Cancel stops only at LogShim calls**: a cancelled run ends with `End` at the next `LogD`/`LogJ`/`LogEvent`/`AssertEq`/`Poll`.
+  A long loop that logs nothing cannot be cancelled cleanly - call `LogShim.Poll` in it. `End` resets module-level
+  variables and skips the macro's cleanup code.
 
 ## 2. VBA language traps (cross-language intuition betrayed)
 
@@ -73,5 +76,5 @@ report additions with `vbaloop bugreport` or a GitHub issue (https://github.com/
 
 - Characters outside CP949, no Debug.Assert, module-qualified calls, no commits before tests are green:
   CLAUDE.md managed block
-- MsgBox/InputBox timeouts, round-trip limits (VB_ProcData loss, one-time casing diff, form pictures),
+- MsgBox/InputBox dialogs, round-trip limits (VB_ProcData loss, one-time casing diff, form pictures),
   poisoned/stale recovery: SKILL.md

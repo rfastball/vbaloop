@@ -127,8 +127,8 @@ pull은 `--force`를 요구한다.
 - `test`: 표준 모듈의 인자 없는 `Test_*` Sub를 모듈 한정으로 실행한다. ephemeral 모드는 정본을 읽기 전용
   일회용 인스턴스로 열어 실행하므로 테스트가 바꾼 시트는 저장되지 않는다(테스트 안의 `Save`는 지원하지 않는다).
 - 실행은 **자식 러너 프로세스**가 맡는다. `Application.Run`은 블로킹 호출이라 같은 프로세스에서는 시간 제한을
-  걸 수 없기 때문이다. 부모가 벽시계 타임아웃(`--timeout`, 기본 120초)을 감시한다. 이 타임아웃은 작업을
-  멈추지 못한다 — 취소 모델로 교체할 설계는 §14.
+  걸 수 없기 때문이다. 부모는 매크로가 끝날 때까지 기다리며 취소 계기(Ctrl+C, 선택 `--timeout`, 안전 상한
+  `[run] maxSeconds`)와 막는 대화상자를 감시한다. 취소 모델은 §14.
 - 판정: 런타임 오류 없이 반환 AND 해당 구간의 LogShim `ok:false` 레코드 0건이면 pass.
 - 어서션 싱크는 프로젝트에 벤더링한 self-contained `LogShim.bas`다. `Debug.Assert`는 헤드리스에서 아무 신호도
   내지 않는다.
@@ -192,6 +192,9 @@ stripComments = false
 [backup]                      # 선택
 keep = 10
 
+[run]                         # 선택
+maxSeconds = 3600             # run/test 안전 상한(§14.5). 소요시간 추정이 아니라 버려진 실행 정리용
+
 [vbaloop]                     # init이 기록(§12.2) - 직접 수정 금지
 managed_by = "0.3.0"
 ```
@@ -233,7 +236,8 @@ JSON/VBA는 생성 입력이며 push 지문에는 생성된 frm/frx만 포함된
 4. 무결성 검사가 (a) 의도치 않은 `<이름>1` 중복을 잡고 (b) 정상 신규 모듈은 통과시킨다
 5. 폼 왕복과 코드비하인드의 한글 주석이 보존된다
 6. 세션 수명주기(멱등 start, stale·poison 판정)
-7. test의 런타임·컴파일 오류 대화상자 처리와 타임아웃 격리
+7. test의 런타임·컴파일 오류 대화상자 처리, 실행 취소(§14.7 E2E: 협조적 취소·유예 뒤 강제 경로·막는 대화상자·
+   Ctrl+C 1·2회·부모 사망·실행 잠금 거부·구 LogShim 폴백·test 모드 취소)
 8. 일회용 모드: 명령 후 EXCEL 프로세스·메타 잔존 0, 타임아웃 후 정리, 하드 kill 잔재의 다음 명령 sweep,
    명시 세션 채택, persistent 회귀
 9. push 컴파일 게이트: 컴파일 오류면 저장 안 함(디스크 무변경), `--skip-compile` 통과, 정상 코드 `compiled`
@@ -248,7 +252,7 @@ JSON/VBA는 생성 입력이며 push 지문에는 생성된 frm/frx만 포함된
   - 런타임 오류: 액세스 키 E(End). Debug는 절대 누르지 않는다(break 모드가 남는다).
   - 컴파일 오류: IDOK/IDCLOSE → 단일 버튼. 그 뒤 VBE를 닫아야 `Application.Run`이 반환된다.
   - 숨은 대화상자도 대상이다. 컴파일 직후에도 잠시 더 감시한다.
-  - MsgBox 같은 사용자 대화상자는 닫지 않고 타임아웃으로 처리한다.
+  - MsgBox 같은 사용자 대화상자는 닫지 않는다. 부모가 5초 넘게 남은 막는 대화상자를 감지해 실패로 끝낸다(§14.5).
 - **lease**: 변경 명령이 프로젝트 lease를 자동으로 잡는다. 소유자는 세션 id 환경변수(Claude Code는
   `CLAUDE_CODE_SESSION_ID`, 생존 판정은 `CLAUDE_PID`) 또는 에이전트 호스트 프로세스(PID+시작 시각)다. 환경변수가
   우선인 이유는 부모가 먼저 끝난 백그라운드 셸에서도 계보와 달리 끊기지 않기 때문이다. 계보 탐색은 sihost 같은
@@ -636,7 +640,7 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 용도는 시트 구조 마이그레이션(열·시트 추가)이다. 1차 구현은 포맷 키만 예약하고, 읽는 쪽은 이 헤더가 있으면
   "지원하지 않는 훅"으로 거부한다(조용히 건너뛰면 마이그레이션 없이 새 코드만 들어간다).
 
-## 14. 실행 중단 (설계 확정, 미구현)
+## 14. 실행 중단 (구현됨)
 
 2026-11-03 벤치 시간 초과 보고에서 출발했다. 180초 제한에 걸리자 러너만 kill되고 매크로는 Excel 안에서 끝까지
 돌았다(타임아웃 뒤에도 측정 기록 2건). 바쁜 Excel은 워크북 목록 판독(§11.2)에 실패해 읽기 전용 일회용 세션인데도
@@ -676,7 +680,7 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
   창이면 Kill, 아니면 격리하고 이유에 창 제목을 적는다. 로그 `recovery_decision`에 `windowTitles`·`ephemeral`.
 - 유지 세션은 이 근거를 쓰지 않는다. 세션 워크북 자체가 미저장 사람 작업을 담을 수 있다.
 
-### 14.4 유지·attach 세션: LogShim 협조적 취소
+### 14.4 유지·attach 세션: LogShim 협조적 취소 (구현됨)
 - Excel을 죽이면 사용자 상태까지 잃으므로 매크로가 스스로 멈추게 한다.
 - 러너가 실행마다 고유한 표시 파일 `_dbg\cancel.<runId>`를 쓴다(이전 실행의 잔재가 다음 실행을 멈추지 않도록).
   러너는 시작 시 현재 runId를 LogShim에 알리고, 종료 시 파일을 지운다.
@@ -688,8 +692,15 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 한계: 멈추기까지의 지연은 LogShim 호출 간격이다(보고서의 벤치는 약 20초). `End`는 모듈 수준 변수를 초기화한다.
 - 반복문 머리에 확인 호출을 push 때 자동 삽입하는 방식은 보류한다. 측정값을 왜곡하고 src와 워크북 코드가 달라져
   pull/diff가 삽입분을 걸러야 한다. 위 두 경로로 부족한 사례가 나오면 검토한다.
+- 구현: 러너가 실행(test는 테스트마다) 직전에 `'<wb>'!LogShim.BeginRun runId`를 부른다. 확인 지점은 `LogD`·`LogJ`
+  (`LogEvent` 포함)·`AssertEq`·`Poll`이고, 취소 기록은 `{"kind":"X","event":"cancelled","runId":..}`다. 러너는
+  호출 구간에 이 runId의 기록이 있으면 `cancelled`로 판정한다(run: `result: "cancelled"`, test: 그 테스트와 남은
+  테스트는 skipped, 루트 `cancelled: true`). `BeginRun`이 없는 구 LogShim은 `Application.Run`이 대화상자 없이
+  오류를 내므로 `run-active.json`에 `cancelSupported: false`를 남기고, 부모는 유예 없이 강제 경로로 간다.
+- `End`는 매크로의 정리 코드도 건너뛴다. 실측(2026-11-03): `Workbooks.Add` 뒤 취소된 매크로는 `wb.Close`에 닿지
+  못했고, 일회용 정리가 남은 `통합 문서1`을 보고 Excel을 사용자에게 넘겼다(`ephemeral_handed_over`, 기존 보호 규칙).
 
-### 14.5 취소를 일으키는 것
+### 14.5 취소를 일으키는 것 (구현됨)
 실행할 때 넘기는 시간 예산을 기본으로 두지 않는다. `run`/`test`는 매크로가 끝날 때까지 기다린다.
 - 모달은 타임아웃이 아니라 워치독이 즉시 감지해 실패로 끝낸다(VBE 오류 창 외의 MsgBox·InputBox·파일 대화상자·
   UserForm까지 확장).
@@ -699,13 +710,48 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 - 버려진 실행 정리용 상한은 프로젝트 설정에만 둔다(예: 1시간). 추정값이 아니라 아무도 취소하지 않는 경우의 안전망이다.
 - 실행 중 진행 상황(경과 시간, LogShim 기록 수, 마지막 기록 이후 경과)을 주기적으로 출력한다. 호출자가 백그라운드로
   돌려도 진행·정체를 판단할 수 있게 한다.
+- 구현(`RunnerSupervisor`): 250ms마다 러너 종료·취소 계기·대화상자를 본다. 취소 계기는 Ctrl+C(첫 번째), 선택
+  `--timeout`, `[run] maxSeconds`(기본 3600) 중 먼저 오는 것이다. 계기가 오면 표시 파일을 쓰고 30초(`CancelGraceMs`)
+  기다린다. 그 안에 러너가 돌아오면 정상 결과(cancelled)를, 아니면 강제 경로(러너 kill → poisoned → §11/§14.3)를
+  탄다. 두 번째 Ctrl+C와 `cancelSupported: false`는 유예 없이 강제 경로다. 콘솔 Ctrl+C는 같은 콘솔의 러너에도
+  가므로 러너도 `CancelKeyPress`를 막고 표시 파일을 쓴다.
+- 막는 대화상자 판정(`ModalHunter.FindBlockingDialogs` + `BlockingDialogTracker`): 워크북 XLMAIN 중 하나라도
+  비활성이면 그 프로세스의 최상위 `#32770`·`NUIDialog`·`ThunderDFrame` 중 VBE 오류 창이 아닌 것을 후보로 보고,
+  같은 창이 5초 남으면 막힘이다. 실행 전부터 있던 창(attach한 사용자 Excel)은 뺀다. 실측(2026-11-03): 바쁜 루프는
+  모든 XLMAIN이 활성, MsgBox 중에는 워크북 XLMAIN이 비활성이고 `#32770`(캡션 = MsgBox 제목)이 보인다. 그래서
+  모드리스 UserForm은 걸리지 않는다. MsgBox 실행은 120초 대신 8초에 끝나고 오류에 캡션·버튼·본문이 실린다.
+- 부모 사망: 부모가 러너에 `--parent-pid`를 넘긴다. 러너는 부모가 사라지면 표시 파일을 쓰고(`runner_parent_gone`)
+  유예 동안 기다린 뒤에도 실행이 남으면 poisoned 기록과 §11 정리 후 종료 코드 3으로 끝난다(`runner_abandoned`).
+  부모가 죽어 일회용 Excel을 닫지 못하면 다음 명령의 잔재 sweep이 정리한다.
+- 진행 출력은 30초마다 stderr 한 줄이다(`vbaloop: run M.P still running - 1m00s elapsed, 60 LogShim record(s),
+  last 0s ago`). 기록 수는 실행 시작 시점 이후 LogShim 파일 증가분이라 러너의 `run_start` 표식도 센다.
 
-### 14.6 잠금
+### 14.6 잠금 (구현됨)
 - 러너가 실행 동안 프로젝트 실행 잠금을 쥔다(부모 사망과 무관하게 매크로가 끝날 때까지 유지).
 - 다른 명령은 이 잠금을 보면 "실행 중인 run 있음"으로 거부하고 runId·경과 시간·진행 기록을 함께 보여 준다.
+- 구현(`RunLock`): 커널 뮤텍스 `Local\vbaloop-run-<프로젝트 키>`와 기록 `_dbg\run-active.json`(runId·명령·대상·
+  러너 PID+시작 시각·Excel PID·표시 파일·`cancelSupported`). 명령 잠금을 쥔 뒤 실행 잠금을 확인한다. 러너가 죽으면
+  뮤텍스는 버려진 상태(= 비어 있음)가 된다. 러너 없이 남은 기록(부모·러너 트리 kill)은 다음 명령이 그 실행의 표시
+  파일을 쓰고, 매크로가 멈췄다는 근거(이 runId의 취소 기록, Excel 소멸, `cancelSupported: false`)가 나오거나
+  30초(`OrphanWaitMs`)가 지날 때까지 exit 3으로 거부한다. 그 뒤 기록을 지우고 평소의 세션 복구에 맡긴다.
+  격리 해제·session stop·격리 자동 해제는 남은 표시 파일을 모두 지운다(강제 경로 뒤 LogShim에 남은 runId가 사용자가
+  계속 쓰는 Excel의 매크로를 End하지 않게).
+- 러너의 부모 감시가 정리를 맡으면 본 스레드와 상태 플래그로 한쪽만 정리하고, 바쁜 Excel의 RCW를 쥐고 있으므로
+  `ComCleanup.HardExit(3)`로 끝낸다. 러너의 Ctrl+C 처리기는 세션 확보 전에 건다(시작 중 Ctrl+C = 실행 전 취소).
+- 막는 대화상자 판정은 LogShim 기록이 지속 시간 동안 늘지 않았을 때만 성립한다(Activate에서 일하는 모달 진행 폼). 부모는 강제 경로에서 러너를 kill한 뒤 자기 기록을 지우고, Excel이 정리됐으면
+  표시 파일도 지운다. 하루 넘은 표시 파일은 러너가 시작할 때 지운다.
 
 ### 14.7 구현 순서
 1. 일회용 세션 정리(§14.3): 완료. 시간 초과 시 바쁜 일회용 Excel이 격리 없이 정리된다.
-2. 잠금(§14.6)과 부모 사망 감시(§14.5).
-3. LogShim 협조적 취소(§14.4). `vbaloop init`으로 관리 사본을 갱신한다.
-4. 모달 즉시 감지 확장과 기본 타임아웃 제거, 진행 출력(§14.5), 에이전트 문서 갱신.
+2. 잠금(§14.6)과 부모 사망 감시(§14.5): 완료.
+3. LogShim 협조적 취소(§14.4): 완료. 기존 프로젝트는 `vbaloop init` 후 push로 관리 사본을 갱신한다.
+4. 모달 즉시 감지 확장과 기본 타임아웃 제거, 진행 출력(§14.5), 에이전트 문서 갱신: 완료.
+
+E2E(2026-11-03, 일회용 세션, 60초 기록 루프 기준):
+- `--timeout 10`: 약 1초 뒤 `cancelled`, 기록 보존, 격리 없음. `Poll`만 부르는 루프도 같다.
+- LogShim 호출이 없는 루프: 유예 30초 뒤 강제 경로, 세션 창만 있어 Excel 정리(§14.3).
+- MsgBox: 8초에 실패, 오류에 `E2E Box | 확인 | 취소 | e2e question`.
+- Ctrl+C 1회: 기록 루프는 곧바로 `cancelled`, 호출 없는 루프는 유예 뒤 강제. 2회: 즉시 강제.
+- 부모만 kill: 러너가 1초 안에 취소, 그 사이 다른 명령은 실행 잠금으로 거부(exit 3), 다음 명령은 정상.
+- test `--timeout 8`: pass 2, 실행 중 테스트 skipped(cancelled while running), 남은 테스트 skipped.
+- 구 LogShim: 강제 경로로 바로 감(대화상자 없음). 두 번째 워크북이 열린 경우는 창 제목과 함께 격리(§14.3 회귀).

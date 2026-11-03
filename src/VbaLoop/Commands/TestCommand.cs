@@ -11,7 +11,6 @@ namespace VbaLoop.Commands;
 /// </summary>
 public static class TestCommand
 {
-    private const int DefaultTimeoutSec = 120;
 
     public static Outcome Run(CliArgs opts)
     {
@@ -30,14 +29,15 @@ public static class TestCommand
         var meta = ses.Meta;
 
         string runId = Guid.NewGuid().ToString("N");
-        int timeoutSec = opts.TimeoutSec ?? DefaultTimeoutSec;
+        // 기본은 완료까지 대기 — --timeout은 선택, 안전 상한은 [run] maxSeconds(설계 §14.5)
+        var limits = new RunLimits(opts.TimeoutSec, cfg.RunMaxSeconds);
 
-        var sup = RunnerSupervisor.Run(cfg, meta, log, "test", runId, timeoutSec,
+        var sup = RunnerSupervisor.Run(cfg, meta, log, "test", runId, limits,
             Array.Empty<string>());
 
-        if (sup.TimedOut)
+        if (sup.Aborted)
         {
-            o.Fail($"test timeout ({timeoutSec}s): child runner terminated, session marked poisoned — {sup.RecoveryTail}",
+            o.Fail($"test {sup.AbortReason}: child runner terminated, session marked poisoned — {sup.RecoveryTail}",
                 sup.SessionHint, environment: true);
             return o;
         }
@@ -73,6 +73,7 @@ public static class TestCommand
         int fail = summaryEl.GetProperty("fail").GetInt32();
         int skipped = summaryEl.TryGetProperty("skipped", out var sk) ? sk.GetInt32() : 0;
         bool sessionDied = sup.SessionDiedAfterModal; // 러너 self-report + supervisor 백스톱 결합
+        bool cancelled = root.TryGetProperty("cancelled", out var cx) && cx.ValueKind == JsonValueKind.True;
         o.Payload = BuildPayload(root, sessionDied, sup.Crash);
 
         o.HumanLines.Add($"test: pass {pass}, fail {fail}" + (skipped > 0 ? $", skipped {skipped}" : ""));
@@ -95,7 +96,9 @@ public static class TestCommand
                 o.HumanLines.Add($"  FAIL {name}" + (detail != null ? $" — {detail}" : ""));
         }
         if (skipped > 0)
-            o.HumanLines.Add($"  SKIP {skipped} — not run because the session ended");
+            o.HumanLines.Add(cancelled
+                ? $"  SKIP {skipped} — cancelled or not run because the run was cancelled"
+                : $"  SKIP {skipped} — not run because the session ended");
 
         if (sessionDied)
             o.HumanLines.Add(sup.DeathWarning);
@@ -104,8 +107,11 @@ public static class TestCommand
         if (sup.Marker != null)
             o.HumanLines.Add($"Warning: {sup.RecoveryTail} — session commands exit 3 until cleared");
 
-        log.Write("info", "test_done", new { runId, pass, fail, skipped, sessionDied });
-        if (fail > 0)
+        log.Write("info", "test_done", new { runId, pass, fail, skipped, sessionDied, cancelled });
+        if (cancelled && !sessionDied && sup.Crash == null)
+            o.Fail($"test run cancelled ({sup.CancelReason ?? "cancel requested"}): pass {pass}, fail {fail}, skipped {skipped}; "
+                   + "the run stopped at a LogShim check point or between tests and the session is intact");
+        else if (fail > 0)
             o.Fail((sup.Crash != null ? (sup.ExcelExit == ExcelExitKind.Exited ? "Excel exited during the run; " : "Excel crashed during the run; ") : "")
                    + $"{fail} test failure(s) (pass {pass}" + (skipped > 0 ? $", skipped {skipped}" : "")
                    + ") — see payload.tests for failure records"

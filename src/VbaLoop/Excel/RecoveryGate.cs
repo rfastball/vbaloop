@@ -24,6 +24,7 @@ public static class RecoveryGate
         if (!m.Corrupt && ProcessIdentity.Identify(m.Pid, m.ExcelStartTime) == IdentityState.Gone)
         {
             RecoveryMarker.Delete(cfg.RecoveryMarkerPath);
+            RunCancel.ClearAll(cfg);
             log?.Write("info", "recovery_auto_cleared", new { pid = m.Pid, reason = m.Reason });
             return;
         }

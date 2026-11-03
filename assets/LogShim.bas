@@ -28,9 +28,29 @@ Private Const MAX_LINES As Long = 5000
 ' field diagnostic trail (bug report 2026-07-10). LogD/AssertEq/Reset are fully silent in release.
 Private Const IS_RELEASE As Boolean = False
 
+' Cooperative cancel (design 14.4). The runner passes its runId through BeginRun; a cancel request is
+' the file <Workbook.Path>\_dbg\cancel.<runId>. LogD/LogJ/LogEvent/AssertEq/Poll look for it at most
+' every 0.5 s; when it exists a cancelled record is written and End stops all running VBA (module-level
+' state is reset). GetAttr is used instead of Dir so a caller's Dir enumeration is not disturbed.
+Private Const CANCEL_CHECK_SEC As Single = 0.5
+Private mRunId As String
+Private mLastCheck As Single
+
+' @desc Stores the runner's runId so log calls can honour a cancel request
+Public Sub BeginRun(runId As String)
+    mRunId = runId
+    mLastCheck = 0
+End Sub
+
+' @desc Stops all running VBA if the runner asked to cancel; put it in long loops that do not log
+Public Sub Poll()
+    CheckCancel
+End Sub
+
 ' @desc Records level and msg as a D record
 Public Sub LogD(level As String, msg As String)
     If IS_RELEASE Then Exit Sub
+    CheckCancel
     On Error GoTo Done
     AppendLine "{""ts"":""" & NowTimestamp() & """,""kind"":""D"",""level"":""" & _
                JsonEscape(level) & """,""msg"":""" & JsonEscape(msg) & """}"
@@ -40,6 +60,7 @@ End Sub
 ' @desc Records eventName and dataJson as a J record
 Public Sub LogJ(eventName As String, dataJson As String)
     If IS_RELEASE And Not IsErrorEvent(eventName) Then Exit Sub
+    CheckCancel
     On Error GoTo Done
     Dim dataPart As String
     If LenB(dataJson) = 0 Then dataPart = "null" Else dataPart = dataJson
@@ -66,6 +87,7 @@ End Sub
 ' @desc Records an assertion result as an A record; never raises on failure
 Public Sub AssertEq(name As String, expected As Variant, actual As Variant)
     If IS_RELEASE Then Exit Sub
+    CheckCancel
     On Error GoTo Done
     Dim okFlag As Boolean
     okFlag = (CStr(expected) = CStr(actual))
@@ -118,6 +140,29 @@ Done:
 End Sub
 
 ' === Internals ===
+
+Private Sub CheckCancel()
+    If IS_RELEASE Then Exit Sub
+    If LenB(mRunId) = 0 Then Exit Sub
+    Dim t As Single
+    t = Timer
+    If t >= mLastCheck And t - mLastCheck < CANCEL_CHECK_SEC Then Exit Sub
+    mLastCheck = t
+    If LenB(ThisWorkbook.Path) = 0 Then Exit Sub
+    Dim attr As Long
+    On Error GoTo NoRequest
+    attr = GetAttr(ThisWorkbook.Path & "\" & DBG_FOLDER & "\cancel." & mRunId)
+    On Error GoTo 0
+    Dim id As String
+    id = mRunId
+    mRunId = vbNullString
+    On Error Resume Next
+    AppendLine "{""ts"":""" & NowTimestamp() & """,""kind"":""X"",""event"":""cancelled"",""runId"":""" & _
+               JsonEscape(id) & """}"
+    On Error GoTo 0
+    End
+NoRequest:
+End Sub
 
 ' @desc Whether an error-class event must be recorded even in release (field diagnostics)
 Private Function IsErrorEvent(eventName As String) As Boolean
