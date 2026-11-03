@@ -25,8 +25,36 @@ public static class SessionProbe
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>부모 측: 자식 프로브를 띄우고 timeoutMs 안에 결과를 받는다. 예외를 던지지 않는다.</summary>
+    /// <summary>부모 측: 자식 프로브를 띄우고 timeoutMs 안에 결과를 받는다. 예외를 던지지 않는다.
+    /// COM 목록을 못 얻었으면(Busy/Unresponsive) EXCEL7 창 제목을 부모가 직접 읽어 붙인다 — 자식이
+    /// 시간 초과로 죽은 경우에도 남는 근거(설계 §14.3).</summary>
     public static ProbeResult Run(int pid, string startTimeIso, int timeoutMs = DefaultTimeoutMs)
+    {
+        var r = RunChildProbe(pid, startTimeIso, timeoutMs);
+        if (r.Kind is ProbeKind.Busy or ProbeKind.Unresponsive)
+        {
+            try { r = r with { WindowTitles = WorkbookWindowTitles(pid) }; }
+            catch { /* 창 판독 실패 — 제목 없이 기존 판정(격리) */ }
+        }
+        return r;
+    }
+
+    /// <summary>pid의 모든 최상위 창 아래 EXCEL7(워크북) 창 제목. 메시지를 보내지 않으므로(GetWindowTextW는
+    /// 타 프로세스 창에 캐시된 제목을 읽음) 매크로 실행 중인 Excel에도 블록되지 않는다.</summary>
+    public static List<string> WorkbookWindowTitles(int pid)
+    {
+        var titles = new List<string>();
+        foreach (var (hwnd, _, _) in NativeMethods.TopLevelWindowsOf(pid))
+            foreach (var h in Excel7Descendants(hwnd))
+            {
+                var sb = new StringBuilder(512);
+                _ = NativeMethods.GetWindowTextW(h, sb, sb.Capacity);
+                titles.Add(sb.ToString());
+            }
+        return titles;
+    }
+
+    private static ProbeResult RunChildProbe(int pid, string startTimeIso, int timeoutMs)
     {
         string? exe = Environment.ProcessPath;
         if (exe == null) return ProbeResult.Unresponsive("cannot determine own exe path");

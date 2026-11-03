@@ -12,8 +12,6 @@ namespace VbaLoop.Commands;
 /// </summary>
 public static class RunCommand
 {
-    private const int DefaultTimeoutSec = 120;
-
     public static Outcome Run(CliArgs opts)
     {
         var o = new Outcome { Command = "run" };
@@ -35,14 +33,15 @@ public static class RunCommand
         var meta = ses.Meta;
 
         string runId = Guid.NewGuid().ToString("N");
-        int timeoutSec = opts.TimeoutSec ?? DefaultTimeoutSec;
+        // 기본은 완료까지 대기 — --timeout은 선택, 안전 상한은 [run] maxSeconds(설계 §14.5)
+        var limits = new RunLimits(opts.TimeoutSec, cfg.RunMaxSeconds);
 
-        var sup = RunnerSupervisor.Run(cfg, meta, log, "run", runId, timeoutSec,
+        var sup = RunnerSupervisor.Run(cfg, meta, log, "run", runId, limits,
             new[] { "--macro", macro });
 
-        if (sup.TimedOut)
+        if (sup.Aborted)
         {
-            o.Fail($"run timeout ({timeoutSec}s): child runner terminated, session marked poisoned — {sup.RecoveryTail}",
+            o.Fail($"run {sup.AbortReason}: child runner terminated, session marked poisoned — {sup.RecoveryTail}",
                 sup.SessionHint, environment: true);
             return o;
         }
@@ -98,6 +97,9 @@ public static class RunCommand
                          (returnType != "Empty" ? $" → {returnValue} ({returnType})" : ""));
         if (failedAsserts > 0)
             o.HumanLines.Add($"Note: {failedAsserts} failed assertion(s) in range (unrelated to run success, see payload.run)");
+        if (run.TryGetProperty("aftermath", out var am) && am.ValueKind == JsonValueKind.Object
+            && am.TryGetProperty("summary", out var ams))
+            o.HumanLines.Add($"Cleanup after the interrupted macro: {ams.GetString()} (payload.run.aftermath)");
 
         if (sup.SessionDiedAfterModal)
             o.HumanLines.Add(sup.DeathWarning);
@@ -107,7 +109,10 @@ public static class RunCommand
             o.HumanLines.Add($"Warning: {sup.RecoveryTail} — session commands exit 3 until cleared");
 
         log.Write("info", "run_done", new { runId, macro, result, elapsed, sessionDied = sup.SessionDiedAfterModal });
-        if (result != "ok")
+        if (result == "cancelled")
+            o.Fail($"run {macro} cancelled ({sup.CancelReason ?? "cancel requested"}): it stopped at a LogShim check point "
+                   + "and the session is intact; records up to that point are in payload.run.records");
+        else if (result != "ok")
             o.Fail($"run {macro} failed" + (detail != null ? $": {detail}" : "")
                    + (sup.SessionDiedAfterModal ? $" (session ended, {sup.RestartNote})" : ""),
                 sup.SessionDiedAfterModal ? sup.DeathHint : null);

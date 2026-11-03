@@ -173,6 +173,27 @@ End Sub
 - `Debug.Assert`는 헤드리스에서 아무 신호도 내지 않으므로 쓰지 않는다. 테스트 안에서 `MsgBox`·`InputBox`도 쓰지 않는다.
 - 기본 설정에서 테스트는 워크북을 읽기 전용으로 열어 실행한다. 테스트 안에서 워크북을 저장(`ThisWorkbook.Save`)하지 않는다.
 
+### 긴 실행과 취소
+
+`test`와 `run`은 시간 제한 없이 매크로가 끝날 때까지 기다리고, 30초마다 진행 상황을 stderr에 한 줄 쓴다.
+
+- **취소**: Ctrl+C(또는 에이전트의 작업 중지)를 누르면 매크로가 다음 `LogShim` 호출에서 멈춘다. 결과는
+  `cancelled`이고 그때까지의 기록은 남는다. 30초 안에 멈추지 않거나 Ctrl+C를 한 번 더 누르면 강제로 끝낸다
+  (일회용 Excel은 정리하고, 사람 작업이 있을 수 있는 Excel은 격리한다).
+- **LogShim을 부르지 않는 긴 루프**에는 `LogShim.Poll`을 넣는다. 확인만 하고 기록은 남기지 않는다.
+- **`--timeout <초>`**는 스크립트·CI용 선택 옵션이다. 시간이 되면 위와 같이 취소한다. 아무도 취소하지 않는
+  실행은 `[run] maxSeconds`(기본 3600초)에서 같은 방식으로 끝난다.
+- **대화상자**: `MsgBox`·`InputBox`·파일 대화상자·모달 UserForm이 5초 넘게 남으면 그 실행은 곧바로 실패한다.
+- 취소는 `End`와 같아서 매크로의 정리 코드(열었던 워크북 닫기 등)도 실행되지 않는다. 그래서 취소나 런타임 오류로
+  끝난 매크로가 바꾼 `EnableEvents`·`Calculation`·`StatusBar`·`Interactive`·`Cursor`는 vbaloop가 실행 전 값으로
+  되돌리고, 매크로가 연 채 남긴 통합 문서는 일회용 세션이면 저장 없이 닫는다(새 문서와 변경이 없는 문서만 — 변경이 남은
+  파일과 유지 세션에서는 알리기만 한다).
+  반쯤 쓴 시트 데이터는 되돌리지 않으니 테스트 셋업은 매번 처음부터 만들게 짠다.
+- `test`·`run`은 취소를 받는 현재 `LogShim`이 필요하다. 오래된 프로젝트는 `vbaloop init` 후 `push`한다.
+- 실행 중에는 같은 프로젝트의 다른 명령이 거부된다. vbaloop 프로세스만 강제 종료되면 실행을 맡은 자식 프로세스가
+  매크로를 멈추고 정리할 때까지(최대 30초 유예) 유지된다. 프로세스 트리째 종료되면 다음 명령이 매크로에 멈춤을 요청하고,
+  멈췄다는 기록이 나오거나 30초가 지날 때까지 거부한다.
+
 ## 명령
 
 | 명령 | 설명 |
@@ -187,8 +208,8 @@ End Sub
 | `form build --spec <json> --code <vba> [--force]` | JSON 디자인과 VBA 코드로 src에 frm/frx 생성. 이후 `push`로 적용 |
 | `pull [--force]` | 워크북 코드를 src로 가져오기 |
 | `diff [--module <이름>]` | 워크북과 src 비교(아무것도 바꾸지 않음) |
-| `test [--timeout <초>]` | `Test_*` 테스트 실행 |
-| `run <Module.Proc>` | 매크로 1개 실행 |
+| `test [--timeout <초>]` | `Test_*` 테스트 실행. 끝날 때까지 기다린다(아래 "긴 실행과 취소") |
+| `run <Module.Proc> [--timeout <초>]` | 매크로 1개 실행. 끝날 때까지 기다린다 |
 | `rollback --list\|--latest\|--backup <id>` | push 직전 백업으로 워크북 복원 |
 | `recovery status\|clear [--force]` | 격리 상태 확인·해제 |
 | `lint` | 인코딩·규약 검사(Excel 불필요) |
@@ -273,6 +294,9 @@ exclude = ["Test_*"]
 [backup]                  # 선택
 keep = 10                 # 0이면 push 전 백업 끔
 
+[run]                     # 선택
+maxSeconds = 3600         # test/run 안전 상한(초). 버려진 실행 정리용이지 소요시간 추정이 아니다
+
 [vbaloop]                 # init이 기록한다. 직접 고치지 않는다
 managed_by = "0.3.0"      # 관리 파일을 마지막으로 쓴 vbaloop 버전
 ```
@@ -296,8 +320,9 @@ vbaloop.exe는 PC에 한 번 설치되고, 관리 파일(`CLAUDE.md` 블록, 스
 - src 파일 규약: UTF-8(BOM 없음) + CRLF + 파일 끝 개행 1개.
 - 프로시저 수준 Attribute(매크로 단축키 등)는 src와 워크북을 오가며 보존되지 않는다. 단축키는 `Application.OnKey`로 등록한다.
 - 폼의 `.frx`(그림 등)만 바뀐 경우 push가 변경을 감지하지 못할 수 있다. 이때는 `push --force-form-import`로 반영한다.
-- 테스트 중 뜬 `MsgBox`/`InputBox`/파일 대화상자는 자동으로 닫히지 않는다. 테스트는 시간 제한에 걸려 끝난다. 일회용
+- 테스트 중 뜬 `MsgBox`/`InputBox`/파일 대화상자는 자동으로 닫히지 않는다. 5초 넘게 남으면 그 실행은 실패로 끝난다. 일회용
   Excel은 도구가 정리하지만, 계속 띄워 둔 세션의 Excel은 격리될 수 있다. `recovery status`로 상태를 확인하고 안내를 따른다.
+- 협조적 취소는 `LogShim` 호출 지점에서만 멈춘다. LogShim을 부르지 않는 루프는 취소 뒤 30초 유예가 지나야 강제로 끝난다.
 - push 전 컴파일 검사는 일회용 Excel에서만 돈다. `session start`·`session attach`로 연 Excel에서는 건너뛰고, 컴파일
   오류는 test 결과로 보고된다.
 

@@ -11,6 +11,10 @@ public enum ProbeKind { Windowless, Responsive, Busy, Unresponsive }
 public sealed record ProbeResult(ProbeKind Kind, IReadOnlyList<string> Workbooks, string? Detail = null)
 {
     public static ProbeResult Unresponsive(string detail) => new(ProbeKind.Unresponsive, Array.Empty<string>(), detail);
+
+    /// <summary>COM 목록을 못 얻었을 때(Busy/Unresponsive) Win32로 읽은 EXCEL7 창 제목(설계 §14.3).
+    /// 메시지를 보내지 않는 판독이라 매크로 실행 중인 Excel에서도 읽힌다.</summary>
+    public IReadOnlyList<string> WindowTitles { get; init; } = Array.Empty<string>();
 }
 
 public enum AutoAction { Clear, Kill, Quarantine }
@@ -26,12 +30,17 @@ public sealed record DiscardDecision(DiscardAction Action, string Why);
 /// 격리/kill 판정의 순수부 (설계 §11 kill 규칙). 부작용 없음 — 실행은 Excel.RecoveryGate.
 /// 규칙: 자동 경로의 kill은 (1) 도구 기동 세션 AND (2) PID+StartTime 신원 일치 AND
 /// (3) 세션 워크북 외 워크북이 없음을 적극적으로 확인(Windowless 또는 Responsive 목록)한 경우만.
+/// 일회용 인스턴스는 Busy/Unresponsive여도 창 제목이 세션 워크북뿐이면 (3)을 충족한다(설계 §14.3).
 /// 그 밖의 모든 불확실성(Busy, Unresponsive, 신원 Unknown, external)은 격리다.
 /// </summary>
 public static class RecoveryPolicy
 {
+    // EXCEL7 제목 = 워크북 이름 + 다중 창 접미사(":2") + 현지화된 상태 접미사("  [읽기 전용]") — 2026-11-03 실측
+    private static readonly System.Text.RegularExpressions.Regex SessionTitleTail =
+        new(@"^(:\d+)?(\s+\[[^\]]*\])*$");
+
     public static AutoDecision DecideAuto(bool external, IdentityState identity, ProbeResult? probe,
-        string sessionWorkbook)
+        string sessionWorkbook, bool ephemeral = false)
     {
         if (identity == IdentityState.Gone)
             return new(AutoAction.Clear, "recorded Excel process already exited");
@@ -53,13 +62,30 @@ public static class RecoveryPolicy
                         ? "no open workbooks"
                         : "only the session workbook is open")
                     : new(AutoAction.Quarantine, $"non-session workbooks open: {string.Join(", ", foreign)}");
+            case ProbeKind.Busy when ephemeral && OnlySessionWindows(probe.WindowTitles, sessionWorkbook):
+            case ProbeKind.Unresponsive when ephemeral && OnlySessionWindows(probe.WindowTitles, sessionWorkbook):
+                return new(AutoAction.Kill, "ephemeral Excel is busy, but its workbook windows show only the session workbook");
             case ProbeKind.Busy:
                 return new(AutoAction.Quarantine, "Excel is busy (suspected cell edit mode/modal dialog) — cannot list workbooks"
-                                                  + Suffix(probe.Detail));
+                                                  + Suffix(probe.Detail) + Windows(probe.WindowTitles));
             default:
-                return new(AutoAction.Quarantine, "Excel is not responding — cannot list workbooks" + Suffix(probe.Detail));
+                return new(AutoAction.Quarantine, "Excel is not responding — cannot list workbooks" + Suffix(probe.Detail)
+                                                  + Windows(probe.WindowTitles));
         }
     }
+
+    /// <summary>EXCEL7 창 제목이 세션 워크북의 창인가. 이름이 다르거나(코드가 Caption을 바꾼 경우 포함)
+    /// 모르는 꼬리가 붙으면 아니다 — 불확실하면 격리 쪽으로 기운다.</summary>
+    public static bool IsSessionWindowTitle(string title, string sessionWorkbook)
+    {
+        string name = Path.GetFileName(sessionWorkbook);
+        return name.Length > 0
+            && title.StartsWith(name, StringComparison.OrdinalIgnoreCase)
+            && SessionTitleTail.IsMatch(title[name.Length..]);
+    }
+
+    public static bool OnlySessionWindows(IReadOnlyList<string> titles, string sessionWorkbook)
+        => titles.Count > 0 && titles.All(t => IsSessionWindowTitle(t, sessionWorkbook));
 
     /// <summary>recovery clear: 기록된 프로세스 소멸 확인 시에만 해제, --force는 경고와 함께 해제.</summary>
     public static ClearDecision DecideClear(bool corrupt, IdentityState identity, bool force)
@@ -104,4 +130,7 @@ public static class RecoveryPolicy
         => workbooks.Where(w => !PathDrift.SamePath(w, sessionWorkbook)).ToList();
 
     private static string Suffix(string? detail) => string.IsNullOrEmpty(detail) ? "" : $" ({detail})";
+
+    private static string Windows(IReadOnlyList<string> titles)
+        => titles.Count == 0 ? "" : $"; workbook windows: {string.Join(", ", titles)}";
 }

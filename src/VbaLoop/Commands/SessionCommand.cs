@@ -336,6 +336,7 @@ public static class SessionCommand
 
         SessionMeta.Delete(cfg.SessionMetaPath);
         RecoveryMarker.Delete(cfg.RecoveryMarkerPath);
+        RunCancel.ClearAll(cfg); // 강제 경로가 남긴 취소 표시가 이 Excel의 이후 매크로를 멈추지 않게(설계 §14.6)
         LeaseService.ReleaseIfMine(cfg, log);
         string action = d.Action switch
         {

@@ -18,12 +18,14 @@ the table below is context for interpreting the hint.
 |------|------|
 | `init --check` exits 3 + `payload.state: "exe-older"` (or a warning that the exe is older than the project) | **Do not run init**; ask the user to run `vbaloop update` -> §exe older than the project |
 | Session missing/stale/poisoned (exit 3) | auto-ensure cleans up and restarts. If it repeats, `doctor` -> §Session poisoned / stale |
-| Session quarantined (exit 3, hint mentions `recovery clear`/`--discard`) | Never kill Excel yourself; tell the user -> §Session quarantined / busy |
+| Session quarantined (exit 3, hint mentions `recovery clear`/`--discard`) | Discard a verified disposable task session without asking again; otherwise ask -> §Session quarantined / busy |
 | busy (exit 3, Excel in cell edit mode or showing a dialog) | Retry the same command shortly -> §Session quarantined / busy |
 | read-only refusal + hint mentions `session attach` | After the user confirms, `session attach` -> §Attaching to the user's Excel |
 | `Excel refused to open the workbook (0x800A03EC)` (exit 3) | Do not copy/rename the workbook or edit the registry; tell the user the hint. A Note "answered Yes" on success is informational |
 | test: 1 fail + many skipped | Only the first fail's `detail` (modal text) is a real signal -> §test timeout / modal |
 | `Excel crashed while running ...` (`payload.excelCrash`) | The code crashed Excel itself; never kill the relaunched Excel -> §test timeout / modal |
+| `blocked by a dialog ...` | A MsgBox/InputBox/file dialog/UserForm is on the headless path; remove it -> §test timeout / modal |
+| run/test `cancelled`, `A vbaloop run is still executing a macro` (exit 3), long run | -> §Long runs and cancel |
 | Fixed it but same error, push keeps returning `cached:true` | `push --force` bypasses the fingerprint cache -> §push refused |
 | push refused (CP949, module mismatch, document module) | §push refused |
 | push fails + `payload.compile.result: compile_error` | Read the modal text, fix, push again -> §push compile gate |
@@ -98,19 +100,27 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 
 ### Session quarantined / busy
 
-- The tool never kills Excel automatically. After a timeout/poison, if it cannot prove that Excel holds no user work
+- After a timeout/poison, if the tool cannot prove that Excel holds no user work
   (other workbooks open, busy, unresponsive, an attached user Excel), it leaves `_dbg\recovery.json` and
   later session commands are refused with exit 3 + hint
-- **Do not lift it yourself.** Do not kill Excel with `session stop --discard` (loses unsaved changes) or
-  `doctor --kill-orphans`; tell the user the situation (PID and reason from the hint):
+- **Clean up disposable task sessions without extra confirmation.** Check `vbaloop recovery status --json` and
+  the current task's launch record: the PID and start time must identify the tool-owned Excel you started for
+  isolated tests/measurements, its unsaved changes must be disposable task output, and it must never have been
+  handed to the user or used for unrelated workbooks. Then run `vbaloop session stop --discard --json`, report
+  the cleanup briefly, and continue. A timeout or busy/unresponsive probe does not revoke this known ownership;
+  `owner: tool`, a hidden window, or a PID alone does not establish it.
+- If those conditions are not established, ask the user with the PID and reason from the hint:
   - If the user saves/closes that Excel themselves -> `vbaloop recovery clear --json`
   - If the user says it may be discarded -> `vbaloop session stop --discard --json`
     (only terminates an Excel the tool started; refuses if non-session workbooks are visible. An attached session is only detached)
+- An earlier user authorization to discard this session still applies; do not ask again. Never use direct process
+  kill, delete recovery markers, or use `doctor --kill-orphans` to bypass a refused discard. Attached user Excel
+  and Office-relaunched recovery Excel are outside the disposable-session exception.
 - `vbaloop recovery status --json` shows the quarantine reason and whether the process is alive. If the recorded Excel
   has already exited, the next session command lifts the marker automatically
 - `recovery clear --force` is a release that needs human judgment - only when the user tells you to
-- busy (exit 3, Excel is in cell edit mode or has a dialog open): the user is using Excel.
-  Retry the same command shortly; if it keeps happening, tell the user. The session is kept
+- busy (exit 3, Excel is in cell edit mode or has a dialog open): retry the same command shortly.
+  If it persists, apply the disposable-session rule above or tell the user. Busy alone does not prove user activity
 
 ### Attaching to the user's Excel
 
@@ -144,10 +154,33 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 - After a crash Office may relaunch a **visible** Excel (`excelCrash.relaunched` PIDs) that reopens the workbook with a recovered copy.
   **Never kill it and do not `session attach` to it** - tell the user; push is refused as read-only until the user closes it
   (test/run still work read-only). The user decides whether to keep the recovered copy
-- MsgBox/infinite loops are cut by the timeout (default 120 s, `--timeout <seconds>`). An ephemeral Excel with only the
-  session workbook open is cleaned up by the tool and the next command starts a new one (hint: rerun the same command). A persistent
-  session's Excel is quarantined if the tool cannot prove there is no user work (§Session quarantined / busy) - tell the user and wait for the release
+- A MsgBox/InputBox/file dialog/modal UserForm that stays up 5 s fails the run at once (`blocked by a dialog ... (<caption> |
+  <buttons> | <text>)`). Remove the dialog from the headless path; do not rerun unchanged code
 - Do not put MsgBox/InputBox in test code - they hang headless runs
+
+### Long runs and cancel
+
+- test/run have no default time limit: they wait until the macro finishes and print a progress line to stderr every 30 s
+  (elapsed, LogShim records, time since the last record). For a run you expect to be long, start it in the background
+  and read those lines instead of guessing a `--timeout`
+- To stop a run, stop the command (Ctrl+C / stop the background task). The macro stops at its next LogShim call:
+  `result: "cancelled"` (test: the running test and the rest are skipped), records up to that point are kept, and the
+  session is intact. `End` skips the macro's own cleanup; the runner undoes what it can after a cancel or runtime error
+  (`Cleanup after the interrupted macro: ...` / `NOTE <test> was interrupted: ...`): Application EnableEvents/Calculation/
+  StatusBar/Interactive/Cursor go back to their values before the run, and workbooks the macro left open are closed without
+  saving in an ephemeral session if nothing is lost (new books, or files with no unsaved changes; the rest and anything in a
+  kept session are only reported). Half-written sheet data is not undone - make test setup
+  idempotent instead of relying on cleanup code
+- If it does not reach a LogShim call within 30 s (or Ctrl+C is pressed twice) the tool forces it: the runner is killed,
+  an ephemeral Excel with only the session workbook is cleaned up (hint: rerun the same command), anything else is
+  quarantined - apply §Session quarantined / busy. Long loops that log nothing should call `LogShim.Poll`
+- `--timeout <seconds>` (scripts/CI) and `[run] maxSeconds` in vbaloop.toml (default 3600, safety cap) cancel the same way
+- While a run is executing, other commands in the project are refused with exit 3 (`A vbaloop run is still executing a
+  macro ...`). If only the vbaloop process was killed, its runner cancels the macro and cleans up within the 30 s grace.
+  If the whole process tree was killed, the next command asks the macro to stop and refuses with `The previous vbaloop
+  run was killed ...` until it stops or 30 s pass. Retry shortly; do not kill Excel
+- `The workbook's LogShim predates cancel support` / `The workbook has no LogShim module`: test/run refuse to start - run
+  `vbaloop init`, then push
 
 ### push refused
 

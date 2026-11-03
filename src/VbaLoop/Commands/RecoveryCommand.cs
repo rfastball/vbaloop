@@ -74,6 +74,7 @@ public static class RecoveryCommand
         }
 
         RecoveryMarker.Delete(cfg.RecoveryMarkerPath);
+        RunCancel.ClearAll(cfg); // 강제 경로가 남긴 취소 표시가 이 Excel의 이후 매크로를 멈추지 않게(설계 §14.6)
         // 세션 메타가 같은 프로세스를 가리키면 함께 잊는다 — --force 후 다음 명령이 같은 Excel을
         // 다시 탐침/격리하지 않게(사용자 소유로 남긴다는 결정을 존중).
         var meta = SessionMeta.Load(cfg.SessionMetaPath);

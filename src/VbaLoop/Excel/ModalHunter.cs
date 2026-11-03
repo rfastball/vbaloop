@@ -95,6 +95,24 @@ public static class ModalHunter
         return found;
     }
 
+    /// <summary>
+    /// 헤드리스 실행을 막고 있는 대화상자(설계 §14.5): MsgBox·InputBox·파일 대화상자(#32770), Excel 프롬프트
+    /// (NUIDialog), 모달 UserForm(ThunderDFrame). 모달 상태의 신호는 Excel 메인 창(XLMAIN)의 비활성화다 —
+    /// 바쁜 루프에서는 모든 XLMAIN이 활성, MsgBox 중에는 워크북 XLMAIN이 비활성(2026-11-03 실측). 그래서
+    /// 진행 표시용 모드리스 UserForm은 걸리지 않는다. VBA 오류 모달은 러너 워치독 소관이라 뺀다.
+    /// </summary>
+    public static List<DialogInfo> FindBlockingDialogs(int pid)
+    {
+        var tops = NativeMethods.TopLevelWindowsOf(pid);
+        if (!tops.Any(t => t.ClassName == "XLMAIN" && !NativeMethods.IsWindowEnabled(t.Hwnd)))
+            return new List<DialogInfo>();
+        return tops
+            .Where(t => t.ClassName is "#32770" or "NUIDialog" or "ThunderDFrame")
+            .Select(t => new DialogInfo(t.Hwnd, t.ClassName, GetCaption(t.Hwnd), t.Visible, GetOwnerChain(t.Hwnd)))
+            .Where(d => !IsVbaModalCaption(d.Caption))
+            .ToList();
+    }
+
     public static string GetCaption(IntPtr hwnd)
     {
         var sb = new StringBuilder(512);
