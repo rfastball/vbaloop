@@ -153,7 +153,8 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
   **Never kill it and do not `session attach` to it** - tell the user; push is refused as read-only until the user closes it
   (test/run still work read-only). The user decides whether to keep the recovered copy
 - MsgBox/infinite loops are cut by the timeout (default 120 s, `--timeout <seconds>`). An ephemeral Excel with only the
-  session workbook open is cleaned up by the tool and the next command starts a new one (hint: rerun the same command). A persistent
+  session workbook open is cleaned up by the tool even while the macro is still running, and the next command starts a new one
+  (hint: rerun the same command). The timeout stops waiting but not the macro, so its results are not valid output. A persistent
   session's Excel is quarantined if the tool cannot prove there is no user work - apply §Session quarantined / busy
 - Do not put MsgBox/InputBox in test code - they hang headless runs
 

@@ -85,6 +85,76 @@ public class RecoveryPolicyTests
         Assert.Equal(AutoAction.Quarantine, d.Action);
     }
 
+    private static ProbeResult Uncertain(ProbeKind kind, params string[] titles)
+        => new(kind, Array.Empty<string>(), "x") { WindowTitles = titles };
+
+    [Theory]
+    [InlineData(ProbeKind.Busy)]
+    [InlineData(ProbeKind.Unresponsive)]
+    public void Auto_BusyEphemeral_OnlySessionWindows_Kills(ProbeKind kind)
+    {
+        // 2026-11-03 시간 초과: 매크로 실행 중인 읽기 전용 일회용 Excel — COM은 실패해도 창 제목이 근거(설계 §14.3)
+        var d = RecoveryPolicy.DecideAuto(false, IdentityState.Match,
+            Uncertain(kind, "Book.xlsm  [읽기 전용]"), Wb, ephemeral: true);
+        Assert.Equal(AutoAction.Kill, d.Action);
+    }
+
+    [Fact]
+    public void Auto_BusyPersistent_StaysQuarantined_EvenWithOnlySessionWindows()
+    {
+        // 유지 세션의 세션 워크북은 미저장 사람 작업을 담을 수 있다 — 창 제목 근거는 일회용에만
+        var d = RecoveryPolicy.DecideAuto(false, IdentityState.Match,
+            Uncertain(ProbeKind.Unresponsive, "Book.xlsm"), Wb, ephemeral: false);
+        Assert.Equal(AutoAction.Quarantine, d.Action);
+    }
+
+    [Fact]
+    public void Auto_BusyEphemeral_ForeignOrUnknownWindow_Quarantines_AndNamesWindows()
+    {
+        // 같은 인스턴스에 열린 두 번째 워크북(숨은 창 포함 실측), Caption을 바꾼 창, 창 제목 없음
+        var d = RecoveryPolicy.DecideAuto(false, IdentityState.Match,
+            Uncertain(ProbeKind.Unresponsive, "Book.xlsm  [읽기 전용]", "통합 문서1"), Wb, ephemeral: true);
+        Assert.Equal(AutoAction.Quarantine, d.Action);
+        Assert.Contains("통합 문서1", d.Why);
+        Assert.Equal(AutoAction.Quarantine, RecoveryPolicy.DecideAuto(false, IdentityState.Match,
+            Uncertain(ProbeKind.Busy, "Renamed"), Wb, ephemeral: true).Action);
+        Assert.Equal(AutoAction.Quarantine, RecoveryPolicy.DecideAuto(false, IdentityState.Match,
+            Uncertain(ProbeKind.Unresponsive), Wb, ephemeral: true).Action);
+    }
+
+    [Fact]
+    public void Auto_ExternalEphemeralFlag_NeverKills()
+    {
+        Assert.Equal(AutoAction.Quarantine, RecoveryPolicy.DecideAuto(true, IdentityState.Match,
+            Uncertain(ProbeKind.Busy, "Book.xlsm"), Wb, ephemeral: true).Action);
+    }
+
+    [Theory]
+    [InlineData("Book.xlsm", true)]
+    [InlineData("BOOK.XLSM", true)]
+    [InlineData("Book.xlsm  [읽기 전용]", true)]
+    [InlineData("Book.xlsm:2  [읽기 전용]", true)]
+    [InlineData("Book.xlsm:1", true)]
+    [InlineData("Book.xlsm  [읽기 전용]  [호환 모드]", true)]
+    [InlineData("Book.xlsm.bak", false)]
+    [InlineData("Book.xlsm - 복사본", false)]
+    [InlineData("Book.xlsm:x", false)]
+    [InlineData("Renamed", false)]
+    [InlineData("", false)]
+    public void SessionWindowTitle_Matching(string title, bool expected)
+    {
+        Assert.Equal(expected, RecoveryPolicy.IsSessionWindowTitle(title, Wb));
+    }
+
+    [Fact]
+    public void SessionWindowTitle_BracketInsideName_NotStripped()
+    {
+        // 이름 자체의 대괄호는 꼬리로 취급하지 않는다 — 이름 전체가 접두로 일치해야 한다
+        const string bracketed = @"C:\Work\Report [v2].xlsm";
+        Assert.True(RecoveryPolicy.IsSessionWindowTitle("Report [v2].xlsm  [읽기 전용]", bracketed));
+        Assert.False(RecoveryPolicy.IsSessionWindowTitle("Report.xlsm", bracketed));
+    }
+
     [Fact]
     public void Clear_ProcessGone_Clears()
     {

@@ -29,8 +29,21 @@
 COM(`AccessibleObjectFromWindow`)이 실패하는 바로 그 상황에서 창 계층으로는 판독된다.
 `SessionProbe`의 폴백으로 쓰면 바쁜 일회용 Excel도 "세션 워크북만 열림"을 증명할 수 있다.
 
-미확인: 두 번째 워크북이 같은 인스턴스에 열린 경우(DDE 재사용 등), 창을 숨긴 워크북(PERSONAL.XLSB 류),
-창이 여러 개인 워크북(`Book:1` 제목), 추가 기능(.xlam은 창이 없어 이 방식으로 보이지 않음).
+창 배치별 실측(`modCases.bas` + `snapshot.ps1`, 매크로가 12초간 바쁜 상태에서 판독):
+
+| 경우 | EXCEL7 제목 |
+|---|---|
+| 두 번째 새 워크북(`Workbooks.Add`) | `통합 문서1`, `Probe.xlsm  [읽기 전용]` (각각 별도 XLMAIN) |
+| 두 번째 워크북 창 숨김(`Windows(1).Visible = False`) | 위와 같음 — 숨은 창도 EXCEL7이 남는다 |
+| 세션 워크북 다중 창(`NewWindow`) | `Probe.xlsm:1  [읽기 전용]`, `Probe.xlsm:2  [읽기 전용]` |
+| 코드가 Caption 변경 | `Renamed` — 이름이 사라진다(모르는 창으로 보고 격리) |
+
+숨은 인스턴스에서는 XLMAIN·EXCEL7 모두 보이지 않으므로 가시성은 판정 근거가 아니다. 워크북 없는 빈 XLMAIN이
+하나 더 있다. 추가 기능(.xlam)은 창이 없어 이 방식으로 보이지 않는다.
+
+제품 반영 뒤 E2E(설계 §14.3): 60초 루프를 `--timeout 10`으로 끊으면 프로브 Unresponsive + 창 제목
+`Probe.xlsm  [읽기 전용]` → Kill, `recovery.json` 없음. 두 번째 워크북을 연 채 끊으면 격리되고 오류에
+`workbook windows: 통합 문서1, Probe.xlsm  [읽기 전용]`이 남는다.
 
 ### 게시형 Ctrl+Break: 효과 없음
 

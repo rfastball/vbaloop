@@ -65,11 +65,12 @@ public static class RecoveryGate
         ProbeResult? probe = identity == IdentityState.Match && !meta.IsExternal
             ? SessionProbe.Run(meta.Pid, meta.ExcelStartTime)
             : null;
-        var d = RecoveryPolicy.DecideAuto(meta.IsExternal, identity, probe, meta.WorkbookFullName);
+        var d = RecoveryPolicy.DecideAuto(meta.IsExternal, identity, probe, meta.WorkbookFullName, meta.Ephemeral);
         log.Write("info", "recovery_decision", new
         {
             pid = meta.Pid, reason, action = d.Action.ToString(), why = d.Why,
             identity = identity.ToString(), probe = probe?.Kind.ToString(), workbooks = probe?.Workbooks,
+            windowTitles = probe?.WindowTitles, ephemeral = meta.Ephemeral,
         });
 
         string why = d.Why;
