@@ -35,8 +35,8 @@ public static class RecoveryGate
         => new($"Session quarantined — {m.Describe()}", HintFor(m), environment: true);
 
     /// <summary>
-    /// 격리 해제 안내. --discard는 미저장 변경을 버리는 파괴적 동작이라 "사용자 확인 후"를 명시한다 —
-    /// 에이전트가 격리를 만나자마자 스스로 kill하는 것을 막는 것이 격리 모델의 요점이다.
+    /// 격리 해제 안내. 현재 작업에서 만든 폐기 가능한 측정/테스트 세션은 재확인 없이 --discard를 허용한다.
+    /// 그 근거가 없으면 사용자에게 묻고, 실제 신원 확인·외부 워크북 보호는 Discard 경로가 유지한다.
     /// </summary>
     public static string HintFor(RecoveryMarker m)
     {
@@ -45,8 +45,13 @@ public static class RecoveryGate
         if (m.IsExternal)
             return $"Do NOT kill Excel (PID {m.Pid}) yourself; inform the user. Once the user has dealt with the dialog/running macro in their Excel, run "
                    + "`vbaloop session stop --discard` (detach only, Excel stays running) — check state with `vbaloop recovery status`";
-        return $"Do NOT kill Excel (PID {m.Pid}) yourself; inform the user and ask whether it holds unsaved work. After the user closes that Excel, run `vbaloop recovery clear`; "
-               + "if the user says it may be discarded, run `vbaloop session stop --discard` (unsaved changes are lost) — check state with `vbaloop recovery status`";
+        return $"Excel (PID {m.Pid}) is quarantined. Check `vbaloop recovery status --json` against your current task's launch record (PID + start time). "
+               + "If this is the tool-owned Excel you started for isolated tests/measurements, all unsaved changes are disposable task output, "
+               + "and it was never handed to the user or used for unrelated workbooks, run `vbaloop session stop --discard --json` without extra confirmation, then continue. "
+               + "Busy/unresponsive alone does not revoke that evidence; tool ownership or a hidden window alone is not enough. "
+               + "Otherwise ask the user whether it may be discarded (honor prior authorization); after the user closes Excel, run `vbaloop recovery clear --json`. "
+               + "Discard loses unsaved changes. Never bypass a refusal with direct process kill, marker deletion, or doctor --kill-orphans; "
+               + "attached user Excel and Office-relaunched recovery Excel are excluded";
     }
 
     /// <summary>

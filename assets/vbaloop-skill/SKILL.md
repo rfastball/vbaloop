@@ -18,7 +18,7 @@ the table below is context for interpreting the hint.
 |------|------|
 | `init --check` exits 3 + `payload.state: "exe-older"` (or a warning that the exe is older than the project) | **Do not run init**; ask the user to run `vbaloop update` -> §exe older than the project |
 | Session missing/stale/poisoned (exit 3) | auto-ensure cleans up and restarts. If it repeats, `doctor` -> §Session poisoned / stale |
-| Session quarantined (exit 3, hint mentions `recovery clear`/`--discard`) | Never kill Excel yourself; tell the user -> §Session quarantined / busy |
+| Session quarantined (exit 3, hint mentions `recovery clear`/`--discard`) | Discard a verified disposable task session without asking again; otherwise ask -> §Session quarantined / busy |
 | busy (exit 3, Excel in cell edit mode or showing a dialog) | Retry the same command shortly -> §Session quarantined / busy |
 | read-only refusal + hint mentions `session attach` | After the user confirms, `session attach` -> §Attaching to the user's Excel |
 | `Excel refused to open the workbook (0x800A03EC)` (exit 3) | Do not copy/rename the workbook or edit the registry; tell the user the hint. A Note "answered Yes" on success is informational |
@@ -98,19 +98,27 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
 
 ### Session quarantined / busy
 
-- The tool never kills Excel automatically. After a timeout/poison, if it cannot prove that Excel holds no user work
+- After a timeout/poison, if the tool cannot prove that Excel holds no user work
   (other workbooks open, busy, unresponsive, an attached user Excel), it leaves `_dbg\recovery.json` and
   later session commands are refused with exit 3 + hint
-- **Do not lift it yourself.** Do not kill Excel with `session stop --discard` (loses unsaved changes) or
-  `doctor --kill-orphans`; tell the user the situation (PID and reason from the hint):
+- **Clean up disposable task sessions without extra confirmation.** Check `vbaloop recovery status --json` and
+  the current task's launch record: the PID and start time must identify the tool-owned Excel you started for
+  isolated tests/measurements, its unsaved changes must be disposable task output, and it must never have been
+  handed to the user or used for unrelated workbooks. Then run `vbaloop session stop --discard --json`, report
+  the cleanup briefly, and continue. A timeout or busy/unresponsive probe does not revoke this known ownership;
+  `owner: tool`, a hidden window, or a PID alone does not establish it.
+- If those conditions are not established, ask the user with the PID and reason from the hint:
   - If the user saves/closes that Excel themselves -> `vbaloop recovery clear --json`
   - If the user says it may be discarded -> `vbaloop session stop --discard --json`
     (only terminates an Excel the tool started; refuses if non-session workbooks are visible. An attached session is only detached)
+- An earlier user authorization to discard this session still applies; do not ask again. Never use direct process
+  kill, delete recovery markers, or use `doctor --kill-orphans` to bypass a refused discard. Attached user Excel
+  and Office-relaunched recovery Excel are outside the disposable-session exception.
 - `vbaloop recovery status --json` shows the quarantine reason and whether the process is alive. If the recorded Excel
   has already exited, the next session command lifts the marker automatically
 - `recovery clear --force` is a release that needs human judgment - only when the user tells you to
-- busy (exit 3, Excel is in cell edit mode or has a dialog open): the user is using Excel.
-  Retry the same command shortly; if it keeps happening, tell the user. The session is kept
+- busy (exit 3, Excel is in cell edit mode or has a dialog open): retry the same command shortly.
+  If it persists, apply the disposable-session rule above or tell the user. Busy alone does not prove user activity
 
 ### Attaching to the user's Excel
 
@@ -146,7 +154,7 @@ keyboard behavior; do not choose layout merely because it is easy to generate.
   (test/run still work read-only). The user decides whether to keep the recovered copy
 - MsgBox/infinite loops are cut by the timeout (default 120 s, `--timeout <seconds>`). An ephemeral Excel with only the
   session workbook open is cleaned up by the tool and the next command starts a new one (hint: rerun the same command). A persistent
-  session's Excel is quarantined if the tool cannot prove there is no user work (§Session quarantined / busy) - tell the user and wait for the release
+  session's Excel is quarantined if the tool cannot prove there is no user work - apply §Session quarantined / busy
 - Do not put MsgBox/InputBox in test code - they hang headless runs
 
 ### push refused

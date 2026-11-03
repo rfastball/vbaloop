@@ -29,7 +29,7 @@ report additions with `vbaloop bugreport` or a GitHub issue (https://github.com/
   Do not leave `Stop` statements in source. `Erl` returns 0 in code without line numbers.
 - **File dialogs hang too**: not just MsgBox/InputBox (see SKILL) -
   `Application.GetOpenFilename`/`GetSaveAsFilename`/`FileDialog` and `UserForm.Show` are also
-  forbidden on headless execution paths - they are only cut by the timeout and Excel is usually quarantined (needs a user release). Inject paths as arguments/constants.
+  forbidden on headless execution paths - they are only cut by the timeout and Excel is usually quarantined (follow SKILL.md's disposable-session recovery rule). Inject paths as arguments/constants.
 
 ## 2. VBA language traps (cross-language intuition betrayed)
 

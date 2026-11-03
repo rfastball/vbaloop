@@ -26,8 +26,13 @@ Write project-specific content outside this managed block (init overwrites the i
 - Every command supports --json: {command, ok, exitCode, hint, errors[], payload}
 - exit code: success 0 / environment error 3 (session/Excel/COM/busy/quarantined - follow the hint) / otherwise 2
 - Quarantined (hint mentions recovery clear / --discard): the tool could not safely clean up Excel, so it stopped instead of killing it.
-  Never kill Excel on your own initiative - that includes running --discard or doctor --kill-orphans before the user says so.
-  Tell the user; if the user closes that Excel, vbaloop recovery clear; if they say it may be discarded, vbaloop session stop --discard
+  Check vbaloop recovery status --json against the current task's launch record (PID + start time). If it is the tool-owned
+  Excel you started for isolated tests/measurements, all unsaved changes are disposable task output, and it was never handed
+  to the user or used for unrelated workbooks, run vbaloop session stop --discard --json without extra confirmation and continue.
+  Busy/unresponsive alone does not revoke that evidence; owner: tool or a hidden window alone is not enough.
+  Otherwise ask the user (honor prior discard authorization); if they close Excel, vbaloop recovery clear;
+  if they authorize discarding it, vbaloop session stop --discard. Attached user Excel and Office recovery Excel are excluded.
+  Never bypass a refusal with direct process kill, marker deletion, or doctor --kill-orphans; orphan cleanup still needs user approval
 - busy (exit 3): Excel is in cell edit mode or showing a dialog - retry the same command shortly
 - If the user already has the canonical workbook open in Excel (read-only refusal hint): after the user confirms,
   vbaloop session attach - push/test then work in that Excel and session stop only detaches
