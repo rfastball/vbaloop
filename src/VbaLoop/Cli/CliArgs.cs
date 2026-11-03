@@ -73,6 +73,8 @@ public sealed class CliArgs
     public bool Adopt { get; private set; }
     /// <summary>push --package 전용: 워크북보다 낮은(또는 순서를 매길 수 없는) 버전의 적용을 허용한다.</summary>
     public bool AllowDowngrade { get; private set; }
+    public string? ExpectedPackageHash { get; private set; }
+    public string? ExpectedWorkbookHash { get; private set; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -82,6 +84,8 @@ public sealed class CliArgs
             switch (args[i])
             {
                 case "--json": r.Json = true; break;
+                case "--expected-package-hash": r.ExpectedPackageHash = HashValue(args, ref i); break;
+                case "--expected-workbook-hash": r.ExpectedWorkbookHash = HashValue(args, ref i); break;
                 case "--prune": r.Prune = true; break;
                 case "--no-save" or "-NoSave": r.NoSave = true; break;
                 case "--check": r.Check = true; break;
@@ -182,6 +186,13 @@ public sealed class CliArgs
         return r;
     }
 
+    private static string HashValue(string[] args, ref int i)
+    {
+        if (++i >= args.Length || args[i].Length != 64 || !args[i].All(Uri.IsHexDigit))
+            throw new CliError("Expected a SHA-256 hash", code: "invalid_request");
+        return args[i];
+    }
+
     /// <summary>
     /// 파싱이 실패해 Parse가 --json을 채우지 못하는 경로(Program의 CliError catch)를 위해
     /// raw argv에서 --json을 직접 감지한다(xlFlow rawArgsRequestJSON 이식). 값-옵션
@@ -203,6 +214,7 @@ public sealed class CliArgs
     {
         "--timeout", "--config", "--runid", "--parent-pid", "--session-meta", "--macro", "--module",
         "--out", "--bootstrap", "--folder", "--workbook", "--new", "--backup", "--spec", "--code", "--package",
+        "--expected-package-hash", "--expected-workbook-hash",
     };
 
     /// <summary>

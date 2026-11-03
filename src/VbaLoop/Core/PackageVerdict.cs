@@ -24,7 +24,7 @@ public static class PackageVerdict
     public const string AdoptHint =
         "If this is the right workbook for this package, run again with --adopt (the first application records the target)";
 
-    public sealed record Result(Decision Decision, string Reason, string? Hint = null, bool Adopting = false);
+    public sealed record Result(Decision Decision, string Reason, string? Hint = null, bool Adopting = false, string? Code = null);
 
     public static Result Decide(WorkbookStamp wb, PackageFormat.Meta pkg, string pkgSha256,
         bool adopt, bool allowDowngrade, Func<bool> codeSame)
@@ -35,14 +35,14 @@ public static class PackageVerdict
             if (!adopt)
                 return new Result(Decision.Refuse,
                     $"workbook has no vbaloop_Target — it was never stamped by vbaloop dist or a package (package target: {pkg.Target})",
-                    AdoptHint);
+                    AdoptHint, Code: "adoption_required");
             adopting = true;
         }
         else if (!string.Equals(wb.Target.Trim(), pkg.Target, StringComparison.OrdinalIgnoreCase))
         {
             return new Result(Decision.Refuse,
                 $"target mismatch: workbook is '{wb.Target.Trim()}', package is '{pkg.Target}'",
-                "Use the package built for this workbook's project (no flag overrides a target mismatch)");
+                "Use the package built for this workbook's project (no flag overrides a target mismatch)", Code: "target_mismatch");
         }
 
         var pkgVer = SemVer.ParseOrNull(pkg.Version)
@@ -56,7 +56,7 @@ public static class PackageVerdict
                 ? new Result(Decision.Apply, $"workbook version '{wb.Version}' is not semver — applying {pkg.Version} (--allow-downgrade)", Adopting: adopting)
                 : new Result(Decision.Refuse,
                     $"workbook version '{wb.Version}' is not semver, so it cannot be ordered against {pkg.Version}",
-                    "Run again with --allow-downgrade if replacing it is intended");
+                    "Run again with --allow-downgrade if replacing it is intended", Code: "invalid_version");
 
         int cmp = pkgVer.CompareTo(wbVer);
         if (cmp > 0)
@@ -66,7 +66,7 @@ public static class PackageVerdict
                 ? new Result(Decision.Apply, $"downgrading {wb.Version} -> {pkg.Version} (--allow-downgrade)", Adopting: adopting)
                 : new Result(Decision.Refuse,
                     $"package {pkg.Version} is older than the workbook ({wb.Version})",
-                    "Run again with --allow-downgrade if the downgrade is intended");
+                    "Run again with --allow-downgrade if the downgrade is intended", Code: "downgrade");
 
         if (codeSame())
             return new Result(Decision.AlreadyApplied, $"already applied: workbook code matches package {pkg.Version}", Adopting: adopting);
@@ -75,6 +75,6 @@ public static class PackageVerdict
                 $"workbook code was changed after package {pkg.Version} was applied — reapplying the same package", Adopting: adopting);
         return new Result(Decision.Refuse,
             $"workbook is already at {pkg.Version} but its code differs from this package — the same version number carries different code",
-            "Raise [dist] version, build the package again, and apply that (no flag overrides this)");
+            "Raise [dist] version, build the package again, and apply that (no flag overrides this)", Code: "version_conflict");
     }
 }

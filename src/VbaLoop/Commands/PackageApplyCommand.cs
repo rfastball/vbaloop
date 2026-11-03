@@ -18,7 +18,7 @@ public static class PackageApplyCommand
     private static readonly string[] MacroExtensions = { ".xlsm", ".xlsb", ".xlam" };
 
     /// <param name="confirm">드래그 앤 드롭 진입 전용(§13.6): 계획을 보여 준 뒤 적용 여부를 묻는다. CLI는 null(비대화형).</param>
-    public static Outcome Run(CliArgs opts, Func<Outcome, bool>? confirm = null)
+    public static Outcome Run(CliArgs opts, Func<Outcome, bool>? confirm = null, PackageUiSession? ui = null)
     {
         var o = new Outcome { Command = "push" };
         var log = new ToolLog(null, "push");
@@ -46,12 +46,17 @@ public static class PackageApplyCommand
                 "A .xlsx cannot hold VBA — saving it would drop the code");
 
         // 1. 패키지 파싱·해시 검증, ACP 가드(Excel 전). 대상 PC의 ACP가 개발 PC와 다를 수 있다
-        var pkg = PackageFormat.Parse(File.ReadAllBytes(pkgPath));
+        ui?.Report("checking");
+        var packageBytes = File.ReadAllBytes(pkgPath);
+        PackageFormat.Package pkg;
+        try { pkg = PackageFormat.Parse(packageBytes); }
+        catch (CliError ex) { throw new CliError(ex.Message, ex.Hint, code: "invalid_package"); }
         int codePage = NativeMethods.GetACP();
         GuardEncoding(pkg, codePage);
 
         using var pathLock = PathMutex.Acquire(wbPath);
         CheckWritable(wbPath);
+        ui?.Verify(packageBytes, wbPath);
 
         string storeDir = PackageApplyStore.FolderFor(PackageApplyStore.DefaultRoot, wbPath);
         var record = new ApplyRecord(wbPath, pkgPath, pkg);
@@ -59,21 +64,28 @@ public static class PackageApplyCommand
         ExcelLauncher.LaunchResult? launch = null;
         try
         {
+            ui?.Report("opening");
             launch = ExcelLauncher.CreateNew(visible: false);
-            return Apply(o, opts, confirm, launch, wbPath, pkgPath, pkg, codePage, storeDir, record, log);
+            ui?.OwnExcel(launch.Pid, launch.StartTimeIso);
+            return Apply(o, opts, confirm, launch, wbPath, pkgPath, pkg, codePage, storeDir, record, log, ui);
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult) || ex.HResult == unchecked((int)0x800706BA))
         {
             record.Result = "failed";
-            throw new CliError($"Excel stopped responding or exited during the apply (0x{ex.HResult:X8}) — the workbook was not saved",
-                "The file on disk is unchanged; retry once, and if it repeats check that the workbook opens in Excel by hand",
-                environment: true);
+            throw new CliError(ui == null
+                    ? $"Excel stopped responding or exited during the apply (0x{ex.HResult:X8}) — the workbook was not saved"
+                    : $"Excel connection was lost (0x{ex.HResult:X8}); save state: {ui.SaveState}",
+                ui == null ? "The file on disk is unchanged; retry once, and if it repeats check that the workbook opens in Excel by hand"
+                    : "Check the workbook and its backup before inspecting again",
+                environment: true, code: "excel_disconnected");
         }
         catch (InvalidComObjectException)
         {
             record.Result = "failed";
-            throw new CliError("Excel connection was lost during the apply — the workbook was not saved",
-                "The file on disk is unchanged; retry once", environment: true);
+            throw new CliError(ui == null ? "Excel connection was lost during the apply — the workbook was not saved"
+                    : $"Excel connection was lost; save state: {ui.SaveState}",
+                ui == null ? "The file on disk is unchanged; retry once" : "Check the workbook and its backup before inspecting again",
+                environment: true, code: "excel_disconnected");
         }
         catch (CliError e)
         {
@@ -96,7 +108,7 @@ public static class PackageApplyCommand
 
     private static Outcome Apply(Outcome o, CliArgs opts, Func<Outcome, bool>? confirm,
         ExcelLauncher.LaunchResult launch, string wbPath, string pkgPath, PackageFormat.Package pkg,
-        int codePage, string storeDir, ApplyRecord record, ToolLog log)
+        int codePage, string storeDir, ApplyRecord record, ToolLog log, PackageUiSession? ui)
     {
         dynamic app = launch.App;
         app.DisplayAlerts = false;
@@ -107,9 +119,10 @@ public static class PackageApplyCommand
         dynamic wb;
         try { wb = WorkbookOpener.Open(app, launch.Pid, wbPath, false, log).Workbook; }
         finally { app.AutomationSecurity = prevSec; }
+        ui?.VerifyOpenedWorkbook(wbPath);
         if (Convert.ToBoolean(wb.ReadOnly))
             throw new CliError($"workbook opened read-only — another process holds it: {wbPath}",
-                "Close the file in every Excel (and on other PCs for a shared drive), then run again", environment: true);
+                "Close the file in every Excel (and on other PCs for a shared drive), then run again", environment: true, code: "file_locked");
 
         // 2. 대상·버전 판정
         var stamp = new PackageVerdict.WorkbookStamp(
@@ -148,6 +161,7 @@ public static class PackageApplyCommand
             o.HumanLines.Add($"  differs from the package: {string.Join(", ", diffs)}");
         if (verdict.Decision == PackageVerdict.Decision.Refuse)
         {
+            o.ErrorCode = verdict.Code;
             record.Result = "refused";
             o.Payload = Payload(null, null, false);
             o.Fail($"package refused: {verdict.Reason}", verdict.Hint);
@@ -162,6 +176,7 @@ public static class PackageApplyCommand
         }
         if (plan.Errors.Count > 0)
         {
+            o.ErrorCode = "incompatible_workbook";
             record.Result = "refused";
             o.Payload = Payload(null, null, false);
             o.Fail($"package does not fit this workbook: {string.Join(" | ", plan.Errors)}",
@@ -189,6 +204,7 @@ public static class PackageApplyCommand
 
         // 4. 백업 — 첫 변경 직전. 실패하면 워크북을 건드리기 전에 멈춘다. 아직 아무것도 바꾸지 않았으므로
         // 디스크 파일이 곧 적용 전 상태다 — SaveCopyAs가 아니라 바이트 그대로 복사한다(Excel 쓰기 경로 무관)
+        ui?.Report("backing_up");
         var slot = BackupStore.Allocate(storeDir, BackupStore.KindPackage, wbPath, DateTime.UtcNow);
         try
         {
@@ -209,7 +225,7 @@ public static class PackageApplyCommand
             record.Result = "failed";
             BackupStore.Discard(slot);
             throw new CliError($"backup failed — aborted before touching the workbook: {ex.Message}",
-                $"Check free space and write permission for {storeDir}");
+                $"Check free space and write permission for {storeDir}", code: "backup_failed");
         }
         record.Backup = slot.Id;
         record.Result = "failed"; // 아래에서 성공으로 바뀌지 않으면 실패 기록
@@ -221,21 +237,25 @@ public static class PackageApplyCommand
         var removed = new List<string>();
         try
         {
+            ui?.Report("applying");
             Inject(proj, plan, codePage, added, removed, log);
             CheckIntegrity(proj, plan, before, added, removed);
         }
         catch (CliError e)
         {
+            o.ErrorCode = "apply_failed";
             o.Payload = Payload(slot.Id, null, false);
             o.Fail($"package apply aborted (not saved): {e.Message} — the file on disk is unchanged", e.Hint ?? "Fix the cause, then retry");
             return o;
         }
 
         // 6. 컴파일 게이트(항상)
+        ui?.Report("compiling");
         var compile = VbeCompile.Run(app, proj, launch.Pid, log, "push");
         object compilePayload = new { result = compile.Label, detail = compile.Detail, location = compile.Location?.ToPayload() };
-        if (!compile.Publishable)
+        if (!compile.Publishable || (ui != null && !PackageUiSession.CanSave(compile.Kind)))
         {
+            o.ErrorCode = "compile_failed";
             record.Result = "compileError";
             o.Payload = Payload(slot.Id, compilePayload, false);
             o.Fail(
@@ -258,15 +278,18 @@ public static class PackageApplyCommand
         WriteDocProp(wb, "vbaloop_BuiltAt", pkg.Meta.BuiltAt ?? "");
         WriteDocProp(wb, "vbaloop_PackageSha256", pkg.Sha256);
         WriteDocProp(wb, "vbaloop_AppliedAt", DateTime.UtcNow.ToString("o"));
+        ui?.Report("saving");
         ComRetry.Invoke(() => { wb.Save(); });
         string actual = Convert.ToString(wb.FullName) ?? "";
         if (!PathDrift.SamePath(actual, wbPath))
         {
+            o.ErrorCode = "save_uncertain";
             o.Payload = Payload(slot.Id, compilePayload, false);
             o.Fail($"save drift: Excel saved to {actual} instead of {wbPath} — the original is unchanged; delete the stray copy after checking it",
                 "Check the file lock and permissions, then retry", environment: true);
             return o;
         }
+        ui?.Report("saved");
         ComRetry.Invoke(() => { wb.Close(false); });
         try { app.Quit(); } catch { /* finally에서 kill */ }
 
@@ -374,7 +397,7 @@ public static class PackageApplyCommand
         if (violations.Count > 0)
             throw new CliError(
                 $"package has characters this PC cannot store in VBA (CP{codePage}): {string.Join(" | ", violations.Take(5))}",
-                "The system code page differs from the development PC; remove those characters from src and build the package again");
+                "The system code page differs from the development PC; remove those characters from src and build the package again", code: "encoding_mismatch");
     }
 
     /// <summary>
@@ -385,7 +408,7 @@ public static class PackageApplyCommand
     {
         if ((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0)
             throw new CliError($"workbook file has the read-only attribute: {path}",
-                "Clear the read-only attribute (file Properties), then run again");
+                "Clear the read-only attribute (file Properties), then run again", code: "read_only");
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -393,13 +416,13 @@ public static class PackageApplyCommand
         catch (UnauthorizedAccessException)
         {
             throw new CliError($"no write permission for the workbook: {path}",
-                "Copy the file to a folder you can write to, or ask for write access");
+                "Copy the file to a folder you can write to, or ask for write access", code: "no_write_access");
         }
         catch (IOException)
         {
             string? owner = ReadLockOwner(path);
             throw new CliError($"workbook is open in another program{(owner != null ? $" (by {owner})" : "")}: {path}",
-                "Close the file and run again", environment: true);
+                "Close the file and run again", environment: true, code: "file_locked");
         }
     }
 
@@ -484,7 +507,7 @@ public static class PackageApplyCommand
     private static void KillIfAlive(ExcelLauncher.LaunchResult launch, ToolLog log)
     {
         // 도구 소유 인스턴스: Quit 후에도 RCW가 남아 종료되지 않으므로 신원이 맞으면 kill(dist 임시 Excel과 같은 처분)
-        if (!ProcessIdentity.IsAlive(launch.Pid, launch.StartTimeIso)) return;
+        if (ProcessIdentity.Identify(launch.Pid, launch.StartTimeIso) != IdentityState.Match) return;
         try { Process.GetProcessById(launch.Pid).Kill(entireProcessTree: true); }
         catch (Exception ex) { log.Write("warn", "package_excel_kill_failed", new { pid = launch.Pid, error = ex.Message }); }
     }

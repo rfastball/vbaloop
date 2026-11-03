@@ -12,6 +12,8 @@ public sealed class Outcome
     public required string Command { get; init; }
     public bool Ok { get; set; } = true;
     public string? Hint { get; set; }
+    // GUI 경로만 사용. 기존 CLI 봉투에는 포함하지 않는다.
+    public string? ErrorCode { get; set; }
     public List<string> Errors { get; } = new();
     public object? Payload { get; set; }
 

@@ -18,7 +18,7 @@ public static class ExcelLauncher
 
         var progType = Type.GetTypeFromProgID("Excel.Application")
             ?? throw new CliError("Excel.Application ProgID not found — Excel not installed?",
-                "Check the environment with vbaloop doctor", environment: true);
+                "Check the environment with vbaloop doctor", environment: true, code: "excel_missing");
 
         dynamic app = Activator.CreateInstance(progType)
             ?? throw new CliError("Failed to create Excel COM instance", environment: true);

@@ -19,6 +19,7 @@ public class PackageVerdictTests
         var r = Decide(null, null);
         Assert.Equal(Decision.Refuse, r.Decision);
         Assert.Contains("--adopt", r.Hint);
+        Assert.Equal("adoption_required", r.Code);
 
         var a = Decide(null, null, adopt: true);
         Assert.Equal(Decision.Apply, a.Decision);

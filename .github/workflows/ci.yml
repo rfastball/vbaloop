@@ -30,11 +30,5 @@ jobs:
         run: dotnet test -c Release --no-build --verbosity normal
 
       - name: Publish smoke (self-contained single file)
-        run: |
-          dotnet publish src\VbaLoop -c Release -r win-x64 `
-            -p:SelfContained=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o publish-smoke
-          # 릴리스와 같은 형태의 산출물이 실제로 기동하는지 확인한다.
-          # version은 Excel도 프로젝트도 필요 없어 CI에서 부를 수 있는 유일한 명령이다.
-          .\publish-smoke\vbaloop.exe version
+        shell: pwsh
+        run: ./build-updater.ps1 -OutputDirectory publish-smoke

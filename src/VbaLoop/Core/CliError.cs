@@ -9,10 +9,12 @@ public sealed class CliError : Exception
 {
     public string? Hint { get; }
     public bool Environment { get; }
+    public string? Code { get; }
 
-    public CliError(string message, string? hint = null, bool environment = false) : base(message)
+    public CliError(string message, string? hint = null, bool environment = false, string? code = null) : base(message)
     {
         Hint = hint;
         Environment = environment;
+        Code = code;
     }
 }

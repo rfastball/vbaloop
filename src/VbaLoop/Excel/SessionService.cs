@@ -293,7 +293,7 @@ public static class SessionService
         {
             throw new CliError(
                 $"VBProject access failed (0x{ex.HResult:X8}) — VBIDE trusted access (AccessVBOM) may not be enabled",
-                "Excel Options > Trust Center > Macro Settings > check 'Trust access to the VBA project object model'");
+                "Excel Options > Trust Center > Macro Settings > check 'Trust access to the VBA project object model'", code: "vbom_denied");
         }
     }
 

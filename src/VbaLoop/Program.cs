@@ -66,6 +66,8 @@ internal static class Program
         // 자식 러너 verb: 봉투 대신 자체 JSON 프로토콜로 부모와 통신 (설계 §4 test)
         if (verb == "__runner")
             return RunnerMain.Run(opts);
+        if (verb == "__package-ui")
+            return PackageUiCommand.Run(opts);
         if (verb == "__probe")
             return Excel.SessionProbe.RunChild(opts);
         if (verb == UpdateCheck.ChildVerb)

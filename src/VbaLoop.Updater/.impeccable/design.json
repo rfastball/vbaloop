@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T22:53:29Z",
+  "title": "Design System: vbaloop updater",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Emerald action" },
+      "content": { "role": "neutral", "displayName": "White content" },
+      "chrome": { "role": "neutral", "displayName": "Quiet gray chrome" },
+      "secondary-text": { "role": "neutral", "displayName": "Supporting text" },
+      "error-surface": { "role": "semantic", "displayName": "Warm recovery notice" },
+      "focus": { "role": "semantic", "displayName": "Keyboard focus" }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Korean headline", "purpose": "Names the current task or result." },
+      "version": { "displayName": "Version comparison", "purpose": "Distinguishes current and incoming versions." },
+      "caption": { "displayName": "Supporting text", "purpose": "Paths, backup instructions, and secondary explanations." }
+    }
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "HTML translation of the WPF footer button for documentation preview; lengths represent DIP.",
+      "html": "<button class=\"ds-primary\">업데이트 시작</button>",
+      "css": ".ds-primary{font:600 14px 'Malgun Gothic',sans-serif;color:#fff;background:#087346;border:1px solid #087346;border-radius:6px;padding:11px 18px;min-height:42px;min-width:176px;cursor:pointer}.ds-primary:hover{opacity:.83}.ds-primary:active{opacity:.65}.ds-primary:disabled{opacity:.4}.ds-primary:focus-visible{border:2px solid #153fbd;outline:none}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Outlined change, back, and backup actions.",
+      "html": "<button class=\"ds-secondary\">변경</button>",
+      "css": ".ds-secondary{font:600 14px 'Malgun Gothic',sans-serif;color:#273d35;background:white;border:1px solid #ccd5d0;border-radius:6px;padding:11px 18px;min-height:42px;cursor:pointer}.ds-secondary:hover{opacity:.83}.ds-secondary:active{opacity:.65}.ds-secondary:disabled{opacity:.4}.ds-secondary:focus-visible{border:2px solid #153fbd;outline:none}"
+    },
+    {
+      "name": "Version comparison",
+      "kind": "custom",
+      "description": "Equal version columns with a fine vector arrow; these values are illustrative.",
+      "html": "<div class=\"ds-versions\"><div><span>현재 버전</span><strong>1.2.0</strong></div><svg viewBox=\"0 0 24 18\" aria-hidden=\"true\"><path d=\"M0 8H22M14 0L22 8L14 16\"/></svg><div><span>새 버전</span><strong class=\"ds-new\">1.3.0</strong></div></div>",
+      "css": ".ds-versions{display:grid;grid-template-columns:1fr 60px 1fr;font:13px 'Malgun Gothic',sans-serif;color:#57685f}.ds-versions strong{display:block;margin-top:5px;font:600 30px 'Segoe UI',sans-serif;color:#192321}.ds-versions .ds-new{color:#087346}.ds-versions svg{width:24px;height:18px;align-self:end;margin-bottom:14px;stroke:#57685f;stroke-width:2;fill:none}"
+    },
+    {
+      "name": "Change details",
+      "kind": "custom",
+      "refersTo": "change-details",
+      "description": "Native WPF expander translated to semantic details for the documentation panel.",
+      "html": "<details class=\"ds-changes\"><summary>변경 내용　교체 4 · 추가 1 · 삭제 0</summary><p>교체　modMain<br>추가　modExport</p></details>",
+      "css": ".ds-changes{font:14px 'Malgun Gothic',sans-serif;color:#192321;background:#f3f6f4;border:1px solid #e1e7e3;padding:12px}.ds-changes summary{font-weight:600;cursor:pointer}.ds-changes p{margin:12px 0 4px 20px;max-height:190px;overflow:auto}.ds-changes summary:focus-visible{outline:2px solid #153fbd;outline-offset:2px}"
+    },
+    {
+      "name": "Error notice",
+      "kind": "custom",
+      "refersTo": "error-notice",
+      "description": "An inline explanation and concrete next action; the details expander remains separate.",
+      "html": "<div class=\"ds-error\">업무 파일이 열려 있습니다. Excel에서 닫은 뒤 다시 검사해 주세요.</div>",
+      "css": ".ds-error{font:14px/22px 'Malgun Gothic',sans-serif;color:#804312;background:#fff7ed;border-radius:6px;padding:20px}"
+    }
+  ],
+  "narrative": {
+    "overview": "The updater uses a light native Windows window, Korean system typography, and one emerald accent. The chosen workbook and version change receive the strongest emphasis before the user applies an update.",
+    "keyCharacteristics": [
+      "A single window changes between selection, inspection, progress, completion, and error states.",
+      "Generous vertical spacing separates the task from its optional details.",
+      "One primary footer action stays visible while the content scrolls.",
+      "Status uses explicit text as well as color."
+    ],
+    "dos": [
+      "Do keep the target workbook and version change visible before application.",
+      "Do use actual stage names and distinguish confirmed success from an uncertain save.",
+      "Do retain selectable details and full-path tooltips for longer values."
+    ],
+    "donts": [
+      "Don't introduce a project sidebar, editor, or promotional artwork into this updater.",
+      "Don't replace explicit status text with color-only indicators or invented progress percentages."
+    ]
+  }
+}

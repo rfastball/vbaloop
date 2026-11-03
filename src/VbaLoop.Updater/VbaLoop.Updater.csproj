@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>vbaloop-updater</AssemblyName>
+    <RootNamespace>VbaLoop.Updater</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SelfContained>false</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/updater.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets/updater.ico" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(EmbeddedCliPath)' != '' And '$(EmbeddedCliManifestPath)' != ''">
+    <EmbeddedResource Include="$(EmbeddedCliPath)" LogicalName="VbaLoop.Updater.Engine.exe" />
+    <EmbeddedResource Include="$(EmbeddedCliManifestPath)" LogicalName="VbaLoop.Updater.Engine.json" />
+  </ItemGroup>
+  <Target Name="RequireEmbeddedEngine" BeforeTargets="PrepareForPublish">
+    <Error Condition="!Exists('$(EmbeddedCliPath)') Or !Exists('$(EmbeddedCliManifestPath)')"
+           Text="Publish with ./build-updater.ps1. It builds and embeds the matching CLI before publishing the updater." />
+  </Target>
+</Project>

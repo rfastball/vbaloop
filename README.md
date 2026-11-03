@@ -240,6 +240,23 @@ vbaloop push --package 지출관리-1.3.0.txt --workbook 지출관리.xlsm   # �
   이미 적용된 패키지는 아무것도 하지 않는다. dist로 만든 적 없는 워크북의 첫 적용에는 `--adopt`가 필요하다.
 - 컴파일이 통과해야 저장한다. 실패하면 디스크의 워크북은 적용 전 그대로다.
 
+### 오프라인 GUI 업데이터
+
+`vbaloop-updater.exe` 하나를 반입해 실행한다. 전체 CLI와 .NET 런타임을 포함하므로 별도 CLI 설치나
+PATH 등록이 필요 없다. 데스크톱 Excel과 VBA 프로젝트 접근 권한은 필요하며, 보안 설정은 자동 변경하지 않는다.
+
+1. txt 패키지와 업무 파일(`.xlsm`/`.xlsb`/`.xlam`)을 선택하거나 창에 끌어놓는다. exe 위로 함께 놓아도 된다.
+2. 대상·버전·추가/교체/삭제 모듈을 확인한다. 처음 적용하는 업무 파일은 등록 확인란을 선택한다.
+3. 업데이트를 시작한다. 원본 백업 → 코드 적용 → 컴파일 확인 → 저장 결과를 화면에서 확인한다.
+
+검사 후 파일이 달라지면 다시 검사해야 한다. GUI는 컴파일 완료를 확인할 수 없는 경우에도 저장하지 않는다.
+백업은 기존 `%LOCALAPPDATA%\vbaloop\backups\`를 사용하며 결과 화면에서 열 수 있다.
+저장 결과가 불명확하면 자동 재시도하지 않고 업무 파일과 백업을 확인하도록 안내한다.
+
+내장 CLI는 `%LOCALAPPDATA%\vbaloop-updater\engine\<SHA-256>\vbaloop.exe`에 추출한다. 매 실행 전 해시를
+확인하며 기존 설치본이나 PATH를 사용하지 않는다. 새 앱 버전은 새 해시 폴더를 사용한다. 사용하지 않는
+이전 캐시는 앱을 닫은 뒤 삭제할 수 있다. 앱은 업데이트 조회나 인터넷 다운로드를 하지 않는다.
+
 ### 에이전트가 폼을 처음부터 작성하기
 
 기존 폼이나 FRX 템플릿 없이 디자인 JSON과 VBA 본문 두 파일을 작성한다.
@@ -330,7 +347,8 @@ vbaloop.exe는 PC에 한 번 설치되고, 관리 파일(`CLAUDE.md` 블록, 스
 
 vbaloop가 PC에 바꾸는 것은 셋이다: Excel의 "VBA 프로젝트 개체 모델에 대한 신뢰할 수 있는 액세스"(AccessVBOM),
 `%LOCALAPPDATA%\vbaloop\bin` 설치와 사용자 PATH 등록, 프로젝트 폴더의 관리 파일. AccessVBOM은 마법사에서 동의하거나
-`--enable-vbom`을 명시해야만 바뀌고, 무엇이 바뀌는지는 `setup --plan`으로 미리 볼 수 있다. 원본 워크북은 수정하지 않는다.
+`--enable-vbom`을 명시해야만 바뀌고, 무엇이 바뀌는지는 `setup --plan`으로 미리 볼 수 있다. `setup`은 원본 대신 사본을 만든다.
+패키지 적용과 GUI 업데이터는 사용자가 선택한 업무 파일을 백업한 뒤 그 파일의 코드를 갱신한다.
 네트워크는 하루 한 번 GitHub에 최신 릴리스 번호를 묻는 것과 `vbaloop update`의 다운로드뿐이고, 코드나 워크북은 보내지 않는다.
 자세한 내용과 되돌리는 방법, 취약점 제보는 [SECURITY.md](SECURITY.md),
 포함된 제3자 코드는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)에 있다.
@@ -342,6 +360,22 @@ dotnet build
 dotnet test                                    # Excel 불필요
 dotnet publish src\VbaLoop -c Release -r win-x64
 ```
+
+CLI와 GUI의 **정규 배포 빌드**는 PowerShell 7에서 다음을 실행한다(.NET SDK 10 이상).
+
+```powershell
+./build-updater.ps1                         # 마지막 v* 태그 버전, artifacts/publish/
+./build-updater.ps1 -Version 1.2.3          # CLI·GUI에 같은 버전 주입
+```
+
+스크립트는 현재 소스로 CLI를 publish하고, 해시·크기·버전 manifest와 함께 GUI에 내장한 뒤
+GUI를 self-contained 단일 exe로 publish한다. 마지막 스모크는 GUI에서 실제 내장 CLI를 추출·실행해
+해시·버전·응답 프로토콜을 확인한다(Excel/네트워크 불필요). CI와 릴리스가 같은 스크립트를 사용한다.
+산출물은 `artifacts/publish/vbaloop.exe`, `vbaloop-updater.exe`, `checksums.txt`다.
+사용자에게는 `vbaloop-updater.exe`만 전달하면 된다. `-OutputDirectory`와 `-DotNet`으로 출력 폴더와 SDK 실행 경로를 지정할 수 있다.
+
+일반 `dotnet build`는 내장 CLI 없이 화면 개발용 빌드를 만든다. GUI 단독 publish는 내장 CLI 입력이 없으면
+실패하도록 막았다. UI 미리보기는 정규 빌드한 exe에 `--preview ready`(또는 `select`, `progress`, `done`, `error`)를 넘긴다.
 
 .NET 10 SDK가 필요하다. 릴리스는 `v*` 태그를 push하면 GitHub Actions가 만든다. 구현 근거는 [DESIGN.md](DESIGN.md).
 
