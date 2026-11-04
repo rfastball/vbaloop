@@ -121,8 +121,9 @@ public static class PackageApplyCommand
         finally { app.AutomationSecurity = prevSec; }
         ui?.VerifyOpenedWorkbook(wbPath);
         if (Convert.ToBoolean(wb.ReadOnly))
-            throw new CliError($"workbook opened read-only — another process holds it: {wbPath}",
-                "Close the file in every Excel (and on other PCs for a shared drive), then run again", environment: true, code: "file_locked");
+            throw new CliError($"Excel opened the workbook read-only: {wbPath}",
+                "Check write-reservation/password, workbook protection, permissions and other programs using the file; no changes were saved",
+                environment: true, code: "workbook_read_only");
 
         // 2. 대상·버전 판정
         var stamp = new PackageVerdict.WorkbookStamp(
@@ -418,11 +419,17 @@ public static class PackageApplyCommand
             throw new CliError($"no write permission for the workbook: {path}",
                 "Copy the file to a folder you can write to, or ask for write access", code: "no_write_access");
         }
-        catch (IOException)
+        catch (IOException ex) when (ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
         {
             string? owner = ReadLockOwner(path);
             throw new CliError($"workbook is open in another program{(owner != null ? $" (by {owner})" : "")}: {path}",
                 "Close the file and run again", environment: true, code: "file_locked");
+        }
+        catch (IOException ex)
+        {
+            throw new CliError($"workbook file access failed (0x{ex.HResult:X8}): {path}: {ex.Message}",
+                "Check the file path, storage device and network/share availability, then inspect again",
+                environment: true, code: "file_io");
         }
     }
 
