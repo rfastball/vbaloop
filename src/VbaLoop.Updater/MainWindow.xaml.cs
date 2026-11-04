@@ -297,6 +297,23 @@ public partial class MainWindow : Window
         try { Clipboard.SetText(ErrorMessage.Text + "\n\n" + ErrorDetails.Text); }
         catch { MessageBox.Show(this, "클립보드를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."); }
     }
+
+    private async void SaveDiagnostics(object sender, RoutedEventArgs e)
+    {
+        if (_preview) return;
+        var dialog = new SaveFileDialog { Title = "진단 로그 저장", Filter = "진단 로그 ZIP (*.zip)|*.zip",
+            FileName = "vbaloop-diagnostics-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip", AddExtension = true };
+        if (dialog.ShowDialog(this) != true) return;
+        DiagnosticsButton.IsEnabled = false;
+        try
+        {
+            await Task.Run(() => _client.ExportDiagnostics(dialog.FileName));
+            MessageBox.Show(this, "진단 로그를 저장했습니다. 이 ZIP 파일을 전달해 주세요.\n진행 중에 저장했다면 오류가 난 뒤 한 번 더 저장해 주세요.",
+                "진단 로그 저장", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "진단 로그를 저장할 수 없습니다", MessageBoxButton.OK, MessageBoxImage.Information); }
+        finally { DiagnosticsButton.IsEnabled = true; }
+    }
     private void OnDragOver(object sender, DragEventArgs e)
     {
         e.Effects = !_busy && !_preview && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;

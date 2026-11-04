@@ -45,6 +45,9 @@
         <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Border Background="#F6F8F7" BorderBrush="#E5EAE7" BorderThickness="0,0,0,1" Padding="32,0">
             <DockPanel VerticalAlignment="Center">
+                <Button x:Name="DiagnosticsButton" DockPanel.Dock="Right" Content="진단 로그 저장" Click="SaveDiagnostics"
+                        FontSize="13" Padding="12,6" MinHeight="32" Margin="16,0,0,0"
+                        ToolTip="실행 기록을 ZIP으로 저장합니다. 대화상자 제목에 파일명이 포함될 수 있습니다."/>
                 <Path Width="28" Height="18" Margin="0,0,10,0" Stroke="{StaticResource Accent}" StrokeThickness="2.5"
                       Stretch="Uniform" Data="M 14,9 C 8,-2 0,1 0,9 C 0,17 8,20 14,9 C 20,-2 28,1 28,9 C 28,17 20,20 14,9"/>
                 <TextBlock Text="vbaloop" FontFamily="Segoe UI" FontSize="20" LineHeight="28" FontWeight="SemiBold"/>

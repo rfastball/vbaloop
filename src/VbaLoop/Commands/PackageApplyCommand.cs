@@ -71,6 +71,7 @@ public static class PackageApplyCommand
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult) || ex.HResult == unchecked((int)0x800706BA))
         {
+            ui?.Diagnostics?.Error("excel_disconnected", ex);
             record.Result = "failed";
             throw new CliError(ui == null
                     ? $"Excel stopped responding or exited during the apply (0x{ex.HResult:X8}) — the workbook was not saved"
@@ -79,8 +80,9 @@ public static class PackageApplyCommand
                     : "Check the workbook and its backup before inspecting again",
                 environment: true, code: "excel_disconnected");
         }
-        catch (InvalidComObjectException)
+        catch (InvalidComObjectException ex)
         {
+            ui?.Diagnostics?.Error("excel_invalid_com_object", ex);
             record.Result = "failed";
             throw new CliError(ui == null ? "Excel connection was lost during the apply — the workbook was not saved"
                     : $"Excel connection was lost; save state: {ui.SaveState}",
@@ -89,13 +91,14 @@ public static class PackageApplyCommand
         }
         catch (CliError e)
         {
+            ui?.Diagnostics?.Error("apply_error", e);
             record.Error ??= e.Message;
             throw;
         }
         finally
         {
             filter.Revoke();
-            if (launch != null) KillIfAlive(launch, log);
+            if (launch != null) KillIfAlive(launch, log, ui?.Diagnostics);
             // --plan은 적용이 아니다 — 이력은 실제 적용 시도(거부 포함)만
             if (record.Result != null && !opts.Plan)
             {
@@ -280,8 +283,12 @@ public static class PackageApplyCommand
         WriteDocProp(wb, "vbaloop_PackageSha256", pkg.Sha256);
         WriteDocProp(wb, "vbaloop_AppliedAt", DateTime.UtcNow.ToString("o"));
         ui?.Report("saving");
+        ui?.Diagnostics?.FileState("workbook_before_save", wbPath);
+        ui?.Diagnostics?.Write("save_enter");
         ComRetry.Invoke(() => { wb.Save(); });
+        ui?.Diagnostics?.Write("save_returned");
         string actual = Convert.ToString(wb.FullName) ?? "";
+        ui?.Diagnostics?.Write("save_path_checked", new { samePath = PathDrift.SamePath(actual, wbPath), extension = Path.GetExtension(actual) });
         if (!PathDrift.SamePath(actual, wbPath))
         {
             o.ErrorCode = "save_uncertain";
@@ -291,8 +298,11 @@ public static class PackageApplyCommand
             return o;
         }
         ui?.Report("saved");
+        ui?.Diagnostics?.Write("close_enter");
         ComRetry.Invoke(() => { wb.Close(false); });
-        try { app.Quit(); } catch { /* finally에서 kill */ }
+        ui?.Diagnostics?.Write("close_returned");
+        try { ui?.Diagnostics?.Write("quit_enter"); app.Quit(); ui?.Diagnostics?.Write("quit_returned"); }
+        catch (Exception ex) { ui?.Diagnostics?.Error("quit_error", ex); /* finally에서 kill */ }
 
         record.Result = verdict.Decision == PackageVerdict.Decision.Reapply ? "reapplied" : "applied";
         record.ToVersion = pkg.Meta.Version;
@@ -514,12 +524,18 @@ public static class PackageApplyCommand
         File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(source));
     }
 
-    private static void KillIfAlive(ExcelLauncher.LaunchResult launch, ToolLog log)
+    private static void KillIfAlive(ExcelLauncher.LaunchResult launch, ToolLog log, UpdaterDiagnostics? diagnostics = null)
     {
         // 도구 소유 인스턴스: Quit 후에도 RCW가 남아 종료되지 않으므로 신원이 맞으면 kill(dist 임시 Excel과 같은 처분)
-        if (ProcessIdentity.Identify(launch.Pid, launch.StartTimeIso) != IdentityState.Match) return;
-        try { Process.GetProcessById(launch.Pid).Kill(entireProcessTree: true); }
-        catch (Exception ex) { log.Write("warn", "package_excel_kill_failed", new { pid = launch.Pid, error = ex.Message }); }
+        var identity = ProcessIdentity.Identify(launch.Pid, launch.StartTimeIso);
+        diagnostics?.Write("cleanup_identity", new { launch.Pid, identity = identity.ToString() });
+        if (identity != IdentityState.Match) return;
+        try {
+            diagnostics?.Write("cleanup_kill_enter", new { launch.Pid });
+            Process.GetProcessById(launch.Pid).Kill(entireProcessTree: true);
+            diagnostics?.Write("cleanup_kill_returned");
+        }
+        catch (Exception ex) { diagnostics?.Error("cleanup_kill_error", ex); log.Write("warn", "package_excel_kill_failed", new { pid = launch.Pid, error = ex.Message }); }
     }
 
     /// <summary>apply.jsonl 한 줄(설계 §13.5): 시각, 원래 경로, 버전, 결과, 백업 id.</summary>

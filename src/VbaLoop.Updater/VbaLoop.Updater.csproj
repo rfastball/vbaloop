@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets/updater.ico" />
+    <Compile Include="../VbaLoop/Core/UpdaterDiagnostics.cs" Link="UpdaterDiagnostics.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(EmbeddedCliPath)' != '' And '$(EmbeddedCliManifestPath)' != ''">
     <EmbeddedResource Include="$(EmbeddedCliPath)" LogicalName="VbaLoop.Updater.Engine.exe" />

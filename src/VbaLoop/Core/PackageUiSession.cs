@@ -5,8 +5,9 @@ using System.Diagnostics;
 namespace VbaLoop.Core;
 
 /// <summary>GUI 전용 프로토콜. 일반 CLI 출력과 저장 정책은 바꾸지 않는다.</summary>
-public sealed class PackageUiSession(string? expectedPackage, string? expectedWorkbook)
+public sealed class PackageUiSession(string? expectedPackage, string? expectedWorkbook, UpdaterDiagnostics? diagnostics = null)
 {
+    public UpdaterDiagnostics? Diagnostics { get; } = diagnostics;
     private readonly object _gate = new();
     private DateTime _lastProgress = DateTime.UtcNow;
     private bool _finished, _slowSaveReported;
@@ -48,6 +49,7 @@ public sealed class PackageUiSession(string? expectedPackage, string? expectedWo
             _lastProgress = DateTime.UtcNow;
             if (phase == "saving") SaveState = "unknown";
             if (phase == "saved") SaveState = "saved";
+            Diagnostics?.Write("phase", new { phase, saveState = SaveState });
             WriteProgress(phase);
         }
     }
@@ -55,6 +57,12 @@ public sealed class PackageUiSession(string? expectedPackage, string? expectedWo
     public void OwnExcel(int pid, string started)
     {
         lock (_gate) { _excelPid = pid; _excelStart = started; }
+        Diagnostics?.Write("excel_owned", new { pid, started });
+    }
+
+    internal (string Phase, string SaveState, int? Pid, string? Start) DiagnosticState()
+    {
+        lock (_gate) return (Phase, SaveState, _excelPid, _excelStart);
     }
 
     public IDisposable Watch(Action onTimeout)
@@ -68,13 +76,14 @@ public sealed class PackageUiSession(string? expectedPackage, string? expectedWo
             // Save 진입과 타임아웃의 소유권을 같은 잠금으로 결정한다. 저장 중 강제 종료 금지.
             if (Phase == "saving")
             {
-                if (!_slowSaveReported) { _slowSaveReported = true; WriteProgress("slow_saving"); }
+                if (!_slowSaveReported) { _slowSaveReported = true; Diagnostics?.Write("slow_saving"); WriteProgress("slow_saving"); }
                 return;
             }
             _finished = true;
+            Diagnostics?.Write("timeout", new { phase = Phase, saveState = SaveState });
             if (_excelPid is { } pid && _excelStart is { } start && ProcessIdentity.Identify(pid, start) == IdentityState.Match)
             {
-                try { Process.GetProcessById(pid).Kill(); } catch { /* 신원 확인한 인스턴스만 종료 시도 */ }
+                try { Diagnostics?.Write("timeout_kill", new { pid }); Process.GetProcessById(pid).Kill(); } catch { /* 신원 확인한 인스턴스만 종료 시도 */ }
             }
             onTimeout();
         }
