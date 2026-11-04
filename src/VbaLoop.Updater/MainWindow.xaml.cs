@@ -10,7 +10,7 @@ public partial class MainWindow : Window
 {
     private enum Screen { Select, Ready, Progress, Done, Error }
     private Screen _screen;
-    private string? _package, _workbook, _backupFolder;
+    private string? _package, _workbook, _backupFolder, _resultWorkbook;
     private PackageResponse? _inspection;
     private bool _busy, _adopt, _preview, _uncertain, _allowBackgroundClose;
     private readonly CliClient _client = new();
@@ -82,6 +82,7 @@ public partial class MainWindow : Window
             _adopt = false;
             _uncertain = false;
             _backupFolder = null;
+            _resultWorkbook = null;
             AdoptCheck.IsChecked = false;
             ShowSelection();
         }
@@ -91,7 +92,7 @@ public partial class MainWindow : Window
     private void ShowSelection()
     {
         ShowScreen(Screen.Select, "업무 파일 업데이트",
-            "받은 패키지와 업데이트할 Excel 파일을 선택해 주세요.", "오프라인 업데이트");
+            "원본을 보존하고 업데이트된 새 파일을 만듭니다.", "오프라인 업데이트");
         SelectedPackage.Text = _package == null ? "전달받은 TXT 패키지" : Path.GetFileName(_package);
         SelectedWorkbook.Text = _workbook == null ? "업데이트할 업무 파일" : Path.GetFileName(_workbook);
         SelectedPackage.Style = (Style)FindResource(_package == null ? "EmptyFile" : "FileName");
@@ -116,6 +117,7 @@ public partial class MainWindow : Window
     private async Task InspectAsync()
     {
         if (_busy || _package == null || _workbook == null) return;
+        _resultWorkbook = null;
         _inspection = null;
         AdoptCheck.IsChecked = false;
         await RunOperationAsync(async progress =>
@@ -127,7 +129,7 @@ public partial class MainWindow : Window
             _backupFolder = result.Payload?.BackupFolder;
             if (!result.Ok) { ShowResponseError(result); return; }
             if (result.AlreadyApplied) { ShowDone(result, already: true); return; }
-            if (!result.CanApply) throw new InvalidDataException("적용 계획이 완전하지 않습니다. 패키지를 다시 확인해 주세요.");
+            if (!result.CanApply || !result.CopyMode) throw new InvalidDataException("사본 업데이트 계획을 확인하지 못했습니다. 새 업데이터로 다시 검사해 주세요.");
             _inspection = result;
             ShowReady(result.Payload!);
         }, false);
@@ -137,14 +139,16 @@ public partial class MainWindow : Window
     {
         if (_inspection?.CanApply != true || _package == null || _workbook == null || (_adopt && AdoptCheck.IsChecked != true)) return;
         var inspection = _inspection;
+        _resultWorkbook = null;
         _inspection = null; // 실패·중복 클릭은 새 검사 없이 재시도할 수 없다.
         await RunOperationAsync(async progress =>
         {
             var result = await _client.RunAsync(_package, _workbook, false, _adopt, inspection, progress);
+            _resultWorkbook = result.OutputWorkbook;
             _backupFolder = result.Payload?.BackupFolder ?? _backupFolder;
             if (result.Applied || result.AlreadyApplied) ShowDone(result, result.AlreadyApplied);
             else if (!result.Ok) ShowResponseError(result);
-            else ShowError("저장 결과를 확인할 수 없습니다. 업무 파일과 백업을 확인해 주세요.", "Unexpected apply result", true);
+            else ShowError("결과 사본의 저장을 확인하지 못했습니다. 원본은 변경하지 않았습니다.", "Unexpected apply result", true);
         }, true);
     }
 
@@ -153,7 +157,7 @@ public partial class MainWindow : Window
         _busy = true;
         _allowBackgroundClose = false;
         ShowScreen(Screen.Progress, applying ? "업데이트하고 있습니다" : "적용 내용을 확인하고 있습니다",
-            applying ? "원본을 백업한 뒤 코드를 적용하고 컴파일을 확인합니다." : "파일 구성과 버전을 확인합니다. 아직 변경하지 않습니다.", applying ? "업데이트 진행 중" : "파일 검사 중");
+            applying ? "작업 사본에 코드를 적용하고 새 결과 파일로 저장합니다. 원본은 보존됩니다." : "작업 사본에서 파일 구성과 버전을 확인합니다.", applying ? "업데이트 진행 중" : "파일 검사 중");
         ProgressSteps.Text = "";
         var progress = new Progress<string>(phase =>
         {
@@ -170,7 +174,7 @@ public partial class MainWindow : Window
                 "backing_up" => "원본 파일을 백업하고 있습니다",
                 "applying" => "코드와 폼을 적용하고 있습니다",
                 "compiling" => "컴파일을 확인하고 있습니다",
-                "saving" => "업무 파일을 저장하고 있습니다",
+                "saving" => "업데이트된 새 파일을 저장하고 있습니다",
                 "saved" => "저장을 완료하고 정리하고 있습니다",
                 "slow_saving" => "Excel의 저장 응답을 기다리고 있습니다",
                 _ => "작업 중입니다",
@@ -186,7 +190,7 @@ public partial class MainWindow : Window
         try { await operation(progress); }
         catch (Exception ex)
         {
-            ShowError(applying ? "작업 결과를 받지 못했습니다. 업무 파일과 백업을 확인한 뒤 다시 검사해 주세요." : ex.Message, ex.ToString(), applying);
+            ShowError(applying ? "결과 사본의 저장을 확인하지 못했습니다. 원본은 변경하지 않았습니다. 진단 로그를 저장해 주세요." : ex.Message, ex.ToString(), applying);
         }
         finally
         {
@@ -219,7 +223,7 @@ public partial class MainWindow : Window
         WarningText.Visibility = Visible(warnings.Count > 0);
         AdoptText.Text = $"이 파일을 ‘{info.Target}’ 업무 파일로 등록하고 처음 업데이트하는 데 동의합니다.";
         AdoptCheck.Visibility = Visible(_adopt);
-        PrimaryButton.Content = "업데이트 시작";
+        PrimaryButton.Content = "업데이트 사본 만들기";
         PrimaryButton.IsEnabled = !_adopt && !_preview;
     }
 
@@ -231,27 +235,31 @@ public partial class MainWindow : Window
 
     private void ShowDone(PackageResponse response, bool already)
     {
-        ShowScreen(Screen.Done, already ? "이미 적용된 업데이트입니다" : "업데이트를 완료했습니다",
-            already ? "업무 파일의 코드가 패키지와 같습니다. 파일을 변경하지 않았습니다." : "이제 업무 파일을 사용할 수 있습니다.", "업데이트 완료");
-        DoneDescription.Text = $"{response.Payload?.Target}  {response.Payload?.Version}\n{Path.GetFileName(_workbook)}";
-        BackupButton.Visibility = Visible(!already && _backupFolder != null);
-        BackupDescription.Text = already ? "새 백업을 만들지 않았습니다." : "복원이 필요하면 업무 파일을 닫고 백업 사본을 원래 위치에 복사하세요.";
-        PrimaryButton.Content = "업무 파일 열기";
+        _resultWorkbook = already ? null : response.OutputWorkbook;
+        ShowScreen(Screen.Done, already ? "이미 적용된 업데이트입니다" : "업데이트된 새 파일을 만들었습니다",
+            already ? "업무 파일의 코드가 패키지와 같습니다. 파일을 변경하지 않았습니다." : "원본은 그대로 보존됩니다. 아래 결과 파일을 사용하세요.", "업데이트 완료");
+        DoneDescription.Text = $"{response.Payload?.Target}  {response.Payload?.Version}\n{(already ? _workbook : _resultWorkbook)}";
+        ResultFolderButton.Visibility = Visible(!already && _resultWorkbook != null);
+        BackupDescription.Text = already ? "새 파일을 만들지 않았습니다." : "결과 폴더에서 파일을 원하는 업무 위치로 복사할 수 있습니다. 상대 경로를 사용하는 매크로·외부 연결은 새 위치에서 확인해 주세요.";
+        PrimaryButton.Content = already ? "업무 파일 열기" : "업데이트된 파일 열기";
     }
 
     private void ShowResponseError(PackageResponse response)
-        => ShowError(response.UserMessage, string.Join("\n", response.Errors.Append(response.Hint ?? "")), response.SaveState != "not_saved");
+    {
+        _resultWorkbook = response.OutputWorkbook;
+        ShowError(response.UserMessage, string.Join("\n", response.Errors.Append(response.Hint ?? "")), response.SaveState != "not_saved");
+    }
 
     private void ShowError(string message, string details, bool uncertain = false)
     {
         _inspection = null;
         _uncertain = uncertain;
-        ShowScreen(Screen.Error, uncertain ? "업무 파일을 확인해 주세요" : "업데이트를 진행할 수 없습니다",
+        ShowScreen(Screen.Error, uncertain ? "결과 사본을 확인해 주세요" : "업데이트를 진행할 수 없습니다",
             "아래 안내를 확인해 주세요.", "확인이 필요합니다");
         ErrorMessage.Text = message;
         ErrorDetails.Text = details;
         ErrorBackupButton.Visibility = Visible(_backupFolder != null && Directory.Exists(_backupFolder));
-        PrimaryButton.Content = uncertain ? "업무 폴더 열기" : _package != null && _workbook != null ? "다시 검사" : "파일 선택";
+        PrimaryButton.Content = uncertain ? "결과 폴더 열기" : _package != null && _workbook != null ? "다시 검사" : "파일 선택";
     }
 
     private async void Primary(object sender, RoutedEventArgs e)
@@ -263,9 +271,9 @@ public partial class MainWindow : Window
                 await InspectAsync();
                 break;
             case Screen.Ready: await ApplyAsync(); break;
-            case Screen.Done: OpenPath(_workbook); break;
+            case Screen.Done: OpenPath(_resultWorkbook ?? _workbook); break;
             case Screen.Error:
-                if (_uncertain) OpenPath(_workbook == null ? null : Path.GetDirectoryName(_workbook));
+                if (_uncertain) OpenResultFolder(sender, e);
                 else if (_package != null && _workbook != null) await InspectAsync();
                 else ShowSelection();
                 break;
@@ -275,7 +283,7 @@ public partial class MainWindow : Window
     private void Back(object sender, RoutedEventArgs e)
     {
         if (_busy || _preview) return;
-        _package = _workbook = _backupFolder = null;
+        _package = _workbook = _backupFolder = _resultWorkbook = null;
         _inspection = null;
         _adopt = _uncertain = false;
         ShowSelection();
@@ -286,6 +294,10 @@ public partial class MainWindow : Window
         if (PrimaryButton != null && _screen == Screen.Ready) PrimaryButton.IsEnabled = !_busy && !_preview && (!_adopt || AdoptCheck.IsChecked == true);
     }
     private void OpenBackup(object sender, RoutedEventArgs e) => OpenPath(_backupFolder);
+    private void OpenResultFolder(object sender, RoutedEventArgs e)
+        => OpenPath(_resultWorkbook == null
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "vbaloop", "updated")
+            : Path.GetDirectoryName(_resultWorkbook));
     private void OpenPath(string? path)
     {
         if (_preview || path == null) return;
@@ -327,7 +339,7 @@ public partial class MainWindow : Window
     {
         if (!_busy) return;
         if (_allowBackgroundClose && MessageBox.Show(this,
-            "창을 닫아도 Excel의 저장 작업은 계속됩니다. 다시 업데이트하기 전에 업무 파일과 백업을 확인해 주세요. 창을 닫을까요?",
+            "창을 닫아도 결과 사본의 저장 작업은 계속됩니다. 원본은 보존됩니다. 다시 실행하기 전에 결과 폴더와 진단 로그를 확인해 주세요. 창을 닫을까요?",
             "저장 응답 대기 중", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes) return;
         e.Cancel = true;
         if (_allowBackgroundClose) return;
@@ -344,7 +356,8 @@ public partial class MainWindow : Window
         var info = new PackageInfo { Target = "지출관리", Version = "1.3.0", PreviousVersion = "1.2.0", Decision = "applied",
             Plan = [new("modMain", "replace"), new("modReport", "replace"), new("Sheet1", "replace document"), new("frmEntry", "reimport form"), new("modExport", "add")] };
         if (state == "ready") ShowReady(info);
-        else if (state == "done") ShowDone(new PackageResponse { Payload = info }, false);
+        else if (state == "done") ShowDone(new PackageResponse { Payload = info, CopyMode = true,
+            OutputWorkbook = @"C:\Users\사용자\AppData\Local\vbaloop\updated\20261104-160000-example\2026년 지출관리.xlsm" }, false);
         else if (state == "progress")
         {
             ShowScreen(Screen.Progress, "업데이트하고 있습니다", "원본을 백업한 뒤 코드를 적용하고 컴파일을 확인합니다.", "업데이트 진행 중");

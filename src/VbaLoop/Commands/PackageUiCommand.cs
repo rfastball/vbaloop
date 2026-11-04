@@ -65,6 +65,7 @@ public static class PackageUiCommand
                 {
                     protocol = 1, command = "package", ok, exitCode, errorCode = code, errors, hint, payload,
                     saveState = session.SaveState, phase = session.Phase,
+                    copyMode = true, outputWorkbook = session.OutputWorkbook,
                     packageHash = session.PackageHash, workbookHash = session.WorkbookHash,
                 }, Output.JsonOptions));
             }

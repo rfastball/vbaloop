@@ -9,7 +9,9 @@ Windows desktop, Korean UI. WPF on the repository's .NET 10 runtime.
 ## Users and purpose
 
 Internal-network users receive a txt VBA package and apply it to an existing business workbook.
-They choose files, review the target/version/module changes, apply, and see the result and backup location.
+They choose files, review the target/version/module changes, create an updated copy, and see its location.
+The original is never opened by Excel or overwritten by the GUI. Inspection and editing use a verified working copy;
+SaveAs writes to a new per-run result folder, and completion opens the result rather than the original.
 The approved UI is the light, emerald-accented four-state mockup from this conversation.
 
 ## Constraints

@@ -57,7 +57,9 @@ internal sealed class PackageUiDiagnostics : IDisposable
             {
                 _lastDialogs = dialogs;
                 _lastFileUse = DateTime.UtcNow;
-                FileUseDiagnostics.Capture(_log, _workbook, dialogs.Length > 0 ? "save_dialog" : "saving", pid);
+                FileUseDiagnostics.Capture(_log, _session.WorkingWorkbook ?? _workbook, dialogs.Length > 0 ? "save_dialog" : "saving", pid);
+                if (_session.OutputWorkbook is { } output && File.Exists(output))
+                    FileUseDiagnostics.Capture(_log, output, "output_during_save", pid);
             }
         }
         catch (Exception ex) { _log.Error("observation_unavailable", ex); }

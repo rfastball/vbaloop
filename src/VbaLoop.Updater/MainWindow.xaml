@@ -117,7 +117,7 @@
                     <CheckBox x:Name="AdoptCheck" Visibility="Collapsed" Margin="0,18,0,0" Checked="AdoptionChanged" Unchecked="AdoptionChanged">
                         <TextBlock x:Name="AdoptText" TextWrapping="Wrap" MaxWidth="550"/>
                     </CheckBox>
-                    <TextBlock Text="업데이트 전에 원본 파일을 자동으로 백업합니다." Style="{StaticResource Caption}" Margin="0,22,0,0"/>
+                    <TextBlock Text="원본을 보존하고 업데이트된 새 파일을 만듭니다. 완료 후 결과 파일과 저장 위치를 확인할 수 있습니다." Style="{StaticResource Caption}" Margin="0,22,0,0"/>
                 </StackPanel>
 
                 <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,22,0,0">
@@ -133,7 +133,7 @@
                         <Path Stroke="{StaticResource Accent}" StrokeThickness="3" Data="M 18,34 L 29,45 L 50,23"/>
                     </Grid>
                     <TextBlock x:Name="DoneDescription" FontSize="16" LineHeight="26"/>
-                    <Button x:Name="BackupButton" Content="백업 폴더 열기" Click="OpenBackup" HorizontalAlignment="Left" Margin="0,26,0,0"/>
+                    <Button x:Name="ResultFolderButton" Content="결과 폴더 열기" Click="OpenResultFolder" HorizontalAlignment="Left" Margin="0,26,0,0"/>
                     <TextBlock x:Name="BackupDescription" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
                 </StackPanel>
 

@@ -79,6 +79,8 @@ components:
 
 The updater uses a light native Windows window, Korean system typography, and one emerald accent.
 The chosen workbook and version change receive the strongest emphasis before the user applies an update.
+The primary apply action creates an updated copy. The completion screen identifies the new file's full path,
+offers opening the result and its folder, and explains that the original is preserved.
 This scoped specification is extracted from `MainWindow.xaml` and its code-behind; root `DESIGN.md`
 remains the CLI architecture contract. Token lengths use px for interchange and represent WPF
 device-independent pixels, not physical display pixels.

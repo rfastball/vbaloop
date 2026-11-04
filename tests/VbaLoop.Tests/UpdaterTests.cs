@@ -17,6 +17,53 @@ public sealed class UpdaterTests : IDisposable
     public UpdaterTests() => Directory.CreateDirectory(_root);
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
+    // Test delta: 원본 교체 금지/스냅샷 검증/결과 경로 격리는 기존 소유자에 2건 추가.
+    // 작은 파일만 사용하고 Excel/프로세스 기동 없이 실패 시 원본 보존 경계를 검증한다.
+    [Fact]
+    public void WorkingCopy_LeavesOriginalUntouched_WithRenameDenyingReader_AndKeepsOutput()
+    {
+        string source = Path.Combine(_root, "business.xlsb");
+        File.WriteAllText(source, "original bytes");
+        string hash = PackageUiSession.FileHash(source);
+        string work, output;
+        using (var reader = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var copy = new GuiWorkbookCopy(source, hash, false, _root))
+        using (var second = new GuiWorkbookCopy(source, hash, false, _root))
+        {
+            work = copy.WorkPath;
+            output = copy.OutputPath!;
+            Assert.NotEqual(source, work);
+            Assert.NotEqual(work, output);
+            Assert.NotEqual(output, second.OutputPath);
+            Assert.Equal(".xlsb", Path.GetExtension(work));
+            Assert.Equal(hash, PackageUiSession.FileHash(work));
+            GuiWorkbookCopy.RequireNewOutput(output);
+            File.WriteAllText(work, "changed working copy");
+            File.WriteAllText(output, "saved output");
+            Assert.Equal("output_exists", Assert.Throws<CliError>(() => GuiWorkbookCopy.RequireNewOutput(output)).Code);
+            Assert.Equal(PackageUiSession.FileHash(output), GuiWorkbookCopy.VerifyOutput(output));
+            Assert.Equal("original bytes", File.ReadAllText(source));
+        }
+        Assert.False(File.Exists(work));
+        Assert.Equal("saved output", File.ReadAllText(output));
+        Assert.Equal(hash, PackageUiSession.FileHash(source));
+    }
+
+    [Fact]
+    public void WorkingCopy_RejectsChangedSource_AndInspectionCreatesNoOutput()
+    {
+        string source = Path.Combine(_root, "business.xlsm");
+        File.WriteAllText(source, "original bytes");
+        string hash = PackageUiSession.FileHash(source);
+        using (var inspect = new GuiWorkbookCopy(source, hash, true, _root))
+            Assert.Null(inspect.OutputPath);
+        Assert.False(Directory.Exists(Path.Combine(_root, "updated")));
+        File.WriteAllText(source, "changed since inspection");
+        Assert.Equal("files_changed", Assert.Throws<CliError>(() => new GuiWorkbookCopy(source, hash, false, _root)).Code);
+        Assert.Empty(Directory.GetDirectories(Path.Combine(_root, "work")));
+        Assert.Equal("changed since inspection", File.ReadAllText(source));
+    }
+
     // Test delta: 중단 후 회수/개인 경로와 예외 본문 제외/용량 제한은 기존 테스트가 검증하지 않는다.
     // 기존 GUI 경계 소유자에 작은 파일 기반 3건 추가. Excel/자식 프로세스/CI lane 추가 없음.
     // diagnostics.2: 같은 사례에 저장 오류 본문의 선택적 보존/경로 제거를 확장. 수집 사례 수 +0.
@@ -125,11 +172,14 @@ public sealed class UpdaterTests : IDisposable
     public void Response_DoesNotConfuseInspectionOrUncertainSaveWithSuccess(string state, bool saved, bool canApply, bool applied)
     {
         string json = JsonSerializer.Serialize(new { protocol = 1, command = "package", ok = true, exitCode = 0,
+            copyMode = true, outputWorkbook = Path.Combine(_root, "updated.xlsm"),
             saveState = state, packageHash = new string('A', 64), workbookHash = new string('B', 64),
             payload = new { decision = "applied", saved } });
         var result = PackageResponse.Parse(json, 0);
         Assert.Equal(canApply, result.CanApply);
         Assert.Equal(applied, result.Applied);
+        result.OutputWorkbook = null;
+        Assert.False(result.Applied);
         Assert.Throws<InvalidDataException>(() => PackageResponse.Parse(json, 3));
     }
 
@@ -139,7 +189,7 @@ public sealed class UpdaterTests : IDisposable
         string package = Path.Combine(_root, "지출 관리 & $(file).txt");
         string workbook = Path.Combine(_root, "업무 파일.xlsm");
         Assert.Throws<InvalidOperationException>(() => CliClient.BuildArguments(package, workbook, false, false, null));
-        var inspected = new PackageResponse { Ok = true, SaveState = "not_saved", PackageHash = new string('A', 64),
+        var inspected = new PackageResponse { CopyMode = true, Ok = true, SaveState = "not_saved", PackageHash = new string('A', 64),
             WorkbookHash = new string('B', 64), Payload = new PackageInfo { Decision = "applied" } };
         var args = CliClient.BuildArguments(package, workbook, false, true, inspected);
         Assert.Equal(package, args[Array.IndexOf(args, "--package") + 1]);

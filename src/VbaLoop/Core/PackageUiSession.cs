@@ -8,6 +8,8 @@ namespace VbaLoop.Core;
 public sealed class PackageUiSession(string? expectedPackage, string? expectedWorkbook, UpdaterDiagnostics? diagnostics = null)
 {
     public UpdaterDiagnostics? Diagnostics { get; } = diagnostics;
+    public string? WorkingWorkbook { get; set; }
+    public string? OutputWorkbook { get; set; }
     private readonly object _gate = new();
     private DateTime _lastProgress = DateTime.UtcNow;
     private bool _finished, _slowSaveReported;
