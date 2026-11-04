@@ -25,6 +25,9 @@
   <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
     <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="VbaLoop.Tests" />
+  </ItemGroup>
 
   <!-- git describe를 SourceRevisionId로 주입 -> InformationalVersion "1.0.0+<rev>"
        (vbaloop version이 판독). -dirty 접미 = 미커밋 소스 빌드. git 실패 시 nogit 폴백.

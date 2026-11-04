@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using VbaLoop.Core;
+using VbaLoop.Commands;
 using VbaLoop.Updater;
 using Xunit;
 
@@ -14,6 +15,28 @@ public sealed class UpdaterTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "vbaloop-updater-test-" + Guid.NewGuid().ToString("N"));
     public UpdaterTests() => Directory.CreateDirectory(_root);
     public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    // Test delta: 공유 쓰기를 허용하는 관찰용 읽기 핸들의 오탐과 실제 쓰기 잠금 차단을
+    // 기존 업데이터 경계에서 검증. 임시 파일 3개만 추가, Excel/프로세스 기동 없음.
+    [Theory]
+    [InlineData(FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, false)]
+    [InlineData(FileAccess.Read, FileShare.Read, true)]
+    [InlineData(FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, true)]
+    public void WritableCheck_AllowsSharedReaders_ButRefusesWritersAndWriteDenial(
+        FileAccess access, FileShare sharing, bool blocked)
+    {
+        string workbook = Path.Combine(_root, "book.xlsm");
+        File.WriteAllText(workbook, "unchanged");
+        PackageApplyCommand.CheckWritable(workbook);
+        using (var holder = new FileStream(workbook, FileMode.Open, access, sharing))
+        {
+            if (blocked)
+                Assert.Equal("file_locked", Assert.Throws<CliError>(() => PackageApplyCommand.CheckWritable(workbook)).Code);
+            else
+                PackageApplyCommand.CheckWritable(workbook);
+        }
+        Assert.Equal("unchanged", File.ReadAllText(workbook));
+    }
 
     [Fact]
     public void Bundle_RepairsCorruptCache_AndRejectsCorruptEmbeddedBytes()

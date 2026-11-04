@@ -405,14 +405,16 @@ public static class PackageApplyCommand
     /// 쓰기 가능 여부를 Excel을 띄우기 전에 판정한다(설계 §13.3). 읽기 전용 속성은 닫아도 풀리지 않아 exit 2,
     /// 다른 프로세스의 잠금은 닫으면 풀리는 환경 상태라 exit 3.
     /// </summary>
-    private static void CheckWritable(string path)
+    internal static void CheckWritable(string path)
     {
         if ((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0)
             throw new CliError($"workbook file has the read-only attribute: {path}",
                 "Clear the read-only attribute (file Properties), then run again", code: "read_only");
         try
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            // 읽기만 하는 관찰자는 허용한다. 기존 쓰기 핸들이나 공유 쓰기를 거부하는
+            // 핸들은 여전히 충돌하므로 사용자 Excel과 동시에 수정하지 않는다.
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
         }
         catch (UnauthorizedAccessException)
         {
@@ -422,8 +424,9 @@ public static class PackageApplyCommand
         catch (IOException ex) when (ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021))
         {
             string? owner = ReadLockOwner(path);
-            throw new CliError($"workbook is open in another program{(owner != null ? $" (by {owner})" : "")}: {path}",
-                "Close the file and run again", environment: true, code: "file_locked");
+            throw new CliError($"workbook write access conflicts with a file lock (0x{ex.HResult:X8}){(owner != null ? $" (by {owner})" : "")}: {path}",
+                "Close Excel/preview windows; if the file is closed, check shared-drive access or ask IT about document-security write restrictions",
+                environment: true, code: "file_locked");
         }
         catch (IOException ex)
         {
