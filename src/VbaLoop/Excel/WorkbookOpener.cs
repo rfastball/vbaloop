@@ -31,7 +31,9 @@ public static class WorkbookOpener
         COMException first;
         try
         {
-            return new Result(app.Workbooks.Open(path, 0, readOnly), null); // UpdateLinks:=0
+            // 권장은 쓰기 보호가 아니다. 알림을 끈 Excel의 기본 응답으로 쓰기 요청이
+            // 읽기 전용으로 바뀌지 않게 하되, 호출자가 명시한 ReadOnly 값은 유지한다.
+            return new Result(app.Workbooks.Open(path, 0, readOnly, IgnoreReadOnlyRecommended: true), null); // UpdateLinks:=0
         }
         catch (COMException ex) when (ex.HResult == XlOpenFailed)
         {
@@ -81,7 +83,7 @@ public static class WorkbookOpener
         watcher.Start();
         try
         {
-            wb = app.Workbooks.Open(path, 0, readOnly);
+            wb = app.Workbooks.Open(path, 0, readOnly, IgnoreReadOnlyRecommended: true);
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult))
         {
