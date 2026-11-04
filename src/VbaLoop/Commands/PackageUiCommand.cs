@@ -19,7 +19,7 @@ public static class PackageUiCommand
         var session = new PackageUiSession(opts.ExpectedPackageHash, opts.ExpectedWorkbookHash, diagnostics);
         diagnostics?.Write("request", new { plan = opts.Plan, adopt = opts.Adopt });
         if (opts.Workbook != null) diagnostics?.FileState("workbook_before", opts.Workbook);
-        using var observer = diagnostics == null ? null : new PackageUiDiagnostics(session, diagnostics);
+        using var observer = diagnostics == null ? null : new PackageUiDiagnostics(session, diagnostics, opts.Workbook);
         var outcome = new Outcome { Command = "push" };
         string? errorCode = null;
         using var watchdog = session.Watch(() =>

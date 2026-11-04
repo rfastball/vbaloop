@@ -19,6 +19,7 @@ public sealed class UpdaterTests : IDisposable
 
     // Test delta: 중단 후 회수/개인 경로와 예외 본문 제외/용량 제한은 기존 테스트가 검증하지 않는다.
     // 기존 GUI 경계 소유자에 작은 파일 기반 3건 추가. Excel/자식 프로세스/CI lane 추가 없음.
+    // diagnostics.2: 같은 사례에 저장 오류 본문의 선택적 보존/경로 제거를 확장. 수집 사례 수 +0.
     [Fact]
     public void Diagnostics_PersistPhases_RedactPaths_AndExcludeExceptionMessages()
     {
@@ -28,10 +29,13 @@ public sealed class UpdaterTests : IDisposable
         session.Report("saving");
         log.Write("dialog", new { title = workbook + " confidential-book.xlsb" });
         log.Error("failure", new InvalidOperationException("SECRET VBA OR CELL VALUE"));
+        log.Error("save_error", new System.Runtime.InteropServices.COMException("Sharing violation: " + workbook, unchecked((int)0x800A03EC)), includeMessage: true);
         session.Report("saved");
         string text = File.ReadAllText(Path.Combine(_root, "worker.jsonl"));
         Assert.DoesNotContain("confidential-book", text);
         Assert.DoesNotContain("SECRET VBA OR CELL VALUE", text);
+        Assert.Contains("Sharing violation: [redacted]", text);
+        Assert.Contains("0x800A03EC", text);
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => JsonDocument.Parse(l)).ToArray();
         try
         {

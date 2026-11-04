@@ -24,9 +24,9 @@ public sealed class UpdaterDiagnostics
         Directory.CreateDirectory(folder);
         _file = Path.Combine(folder, name + ".jsonl");
         var secrets = paths.Where(p => !string.IsNullOrWhiteSpace(p))
-            .SelectMany(p => new[] { p!, Path.GetFileName(p!) })
+            .SelectMany(p => new[] { p!, Path.GetFileName(p!), Path.GetDirectoryName(p!) })
             .Concat([Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.UserName])
-            .Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().OrderByDescending(p => p.Length).ToArray();
+            .Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!).Distinct().OrderByDescending(p => p.Length).ToArray();
         _json = new JsonSerializerOptions();
         _json.Converters.Add(new RedactedStrings(secrets));
         // 시작 전에 기록 가능 여부 확인. 작업 도중 로깅 실패는 업무 파일 처리에 전파하지 않는다.
@@ -71,9 +71,10 @@ public sealed class UpdaterDiagnostics
         }
     }
 
-    // 예외 Message에는 VBA 코드/업무 데이터가 들어갈 수 있으므로 수집하지 않는다.
-    public void Error(string kind, Exception error) => Write(kind, new {
+    // 저장 호출 예외만 본문 수집을 허용한다. 컴파일/실행 예외에는 VBA 코드/업무 데이터가 포함될 수 있다.
+    public void Error(string kind, Exception error, bool includeMessage = false) => Write(kind, new {
         type = error.GetType().FullName, hresult = $"0x{error.HResult:X8}", stack = error.StackTrace,
+        message = includeMessage ? error.Message[..Math.Min(error.Message.Length, 4096)] : null,
         innerType = error.InnerException?.GetType().FullName,
         innerHresult = error.InnerException is { } inner ? $"0x{inner.HResult:X8}" : null });
 

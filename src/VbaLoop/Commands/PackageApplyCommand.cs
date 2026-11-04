@@ -55,6 +55,7 @@ public static class PackageApplyCommand
         GuardEncoding(pkg, codePage);
 
         using var pathLock = PathMutex.Acquire(wbPath);
+        FileUseDiagnostics.Capture(ui?.Diagnostics, wbPath, "before_open");
         CheckWritable(wbPath);
         ui?.Verify(packageBytes, wbPath);
 
@@ -282,10 +283,17 @@ public static class PackageApplyCommand
         WriteDocProp(wb, "vbaloop_BuiltAt", pkg.Meta.BuiltAt ?? "");
         WriteDocProp(wb, "vbaloop_PackageSha256", pkg.Sha256);
         WriteDocProp(wb, "vbaloop_AppliedAt", DateTime.UtcNow.ToString("o"));
+        FileUseDiagnostics.Capture(ui?.Diagnostics, wbPath, "before_save", launch.Pid);
         ui?.Report("saving");
         ui?.Diagnostics?.FileState("workbook_before_save", wbPath);
         ui?.Diagnostics?.Write("save_enter");
-        ComRetry.Invoke(() => { wb.Save(); });
+        try { ComRetry.Invoke(() => { wb.Save(); }); }
+        catch (COMException ex)
+        {
+            ui?.Diagnostics?.Error("save_error", ex, includeMessage: true);
+            FileUseDiagnostics.Capture(ui?.Diagnostics, wbPath, "save_error_before_cleanup", launch.Pid);
+            throw;
+        }
         ui?.Diagnostics?.Write("save_returned");
         string actual = Convert.ToString(wb.FullName) ?? "";
         ui?.Diagnostics?.Write("save_path_checked", new { samePath = PathDrift.SamePath(actual, wbPath), extension = Path.GetExtension(actual) });
