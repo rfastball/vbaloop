@@ -9,7 +9,17 @@ public static class PackageUiCommand
 {
     public static int Run(CliArgs opts)
     {
-        var session = new PackageUiSession(opts.ExpectedPackageHash, opts.ExpectedWorkbookHash);
+        UpdaterDiagnostics? diagnostics = null;
+        string? diagnosticFolder = Environment.GetEnvironmentVariable(UpdaterDiagnostics.FolderVariable);
+        if (!string.IsNullOrWhiteSpace(diagnosticFolder))
+        {
+            try { diagnostics = new UpdaterDiagnostics(diagnosticFolder, "worker", opts.Package, opts.Workbook); }
+            catch (Exception ex) { Console.Error.WriteLine($"diagnostic_unavailable: {ex.GetType().Name} (0x{ex.HResult:X8})"); }
+        }
+        var session = new PackageUiSession(opts.ExpectedPackageHash, opts.ExpectedWorkbookHash, diagnostics);
+        diagnostics?.Write("request", new { plan = opts.Plan, adopt = opts.Adopt });
+        if (opts.Workbook != null) diagnostics?.FileState("workbook_before", opts.Workbook);
+        using var observer = diagnostics == null ? null : new PackageUiDiagnostics(session, diagnostics, opts.Workbook);
         var outcome = new Outcome { Command = "push" };
         string? errorCode = null;
         using var watchdog = session.Watch(() =>
@@ -29,11 +39,13 @@ public static class PackageUiCommand
         }
         catch (CliError ex)
         {
+            diagnostics?.Error("command_error", ex);
             outcome.Fail(ex.Message, ex.Hint, ex.Environment);
             errorCode = ex.Code;
         }
         catch (Exception ex)
         {
+            diagnostics?.Error("unexpected_error", ex);
             outcome.Fail($"{ex.GetType().Name}: {ex.Message}");
             errorCode = "unexpected_error";
         }
@@ -45,12 +57,15 @@ public static class PackageUiCommand
 
         void WriteResult(bool ok, int exitCode, string? code, IEnumerable<string> errors, string? hint, object? payload)
         {
+            diagnostics?.Write("result", new { ok, exitCode, errorCode = code, phase = session.Phase, saveState = session.SaveState });
+            if (opts.Workbook != null) diagnostics?.FileState("workbook_after", opts.Workbook);
             try
             {
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
                     protocol = 1, command = "package", ok, exitCode, errorCode = code, errors, hint, payload,
                     saveState = session.SaveState, phase = session.Phase,
+                    copyMode = true, outputWorkbook = session.OutputWorkbook,
                     packageHash = session.PackageHash, workbookHash = session.WorkbookHash,
                 }, Output.JsonOptions));
             }

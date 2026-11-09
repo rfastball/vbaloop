@@ -642,7 +642,9 @@ Modules=modMain.bas,Sheet1.cls,ThisWorkbook.cls,frmInput.frm
 
 ### 13.9 GUI 업데이터
 GUI 업데이터의 화면 규약은 `src/VbaLoop.Updater/DESIGN.md`에 둔다. 배포는 `build-updater.ps1`이
-같은 소스의 CLI를 먼저 빌드해 해시 manifest와 함께 GUI에 내장한다. `__package-ui`는 GUI 전용 내부
+같은 소스의 CLI를 먼저 빌드해 해시 manifest와 함께 GUI에 내장한다. 내장본은 런타임 없는 관리 DLL이며,
+GUI가 자기 exe를 `--engine`으로 다시 띄운 별도 STA 프로세스에서 해시 확인 뒤 로드한다(런타임 중복 제거:
+v0.6.1 98.2 MiB → 62.3 MiB). 트리밍은 `dynamic` COM·XAML 경로 위험으로 적용하지 않는다. `__package-ui`는 GUI 전용 내부
 프로토콜(version 1)이며 stdout 최종 JSON, stderr 단계 JSON을 사용한다. 일반 CLI 봉투는 바뀌지 않는다.
 GUI 적용은 검사 때의 패키지/워크북 SHA-256을 요구하고 열기 전·후 워크북 변경을 검사한다.
 `Unverified` 컴파일은 GUI에서 저장을 막으며 일반 CLI 정책은 유지한다. 저장 시작 뒤 결과를 잃으면
@@ -660,6 +662,10 @@ GUI 전용 워치독은 저장 전 단계에서 2분간 진행이 없으면 신�
 추가하지 않았다. 단위 테스트의 Excel/프로세스 기동 증가는 0, 전체 974개 통과(442ms; 변경 전 시간은 미측정).
 기존 publish 스모크를 GUI 1회 + 내장 CLI 2회 실행으로 대체해 정규 빌드당 프로세스 기동은 2회 늘었다.
 coverage 기준은 변경하지 않았다. NuGet 취약성 목록은 검증 환경의 네트워크 제한으로 조회하지 못했다.
+
+검증(2026-11-09): DLL 내장 + 결과 위치 직접 저장 빌드로 실제 패키지(1.1.5 → 1.2.1, 모듈 38개, 폼 포함)를
+`--engine __package-ui` 경로로 검사하고 첫 등록 적용했다. 컴파일 통과·저장 확인, 원본 해시 유지,
+결과 재검사 alreadyApplied, 잔존 Excel 없음. 단위 테스트 984개 통과.
 
 ## 14. 실행 중단 (구현됨)
 

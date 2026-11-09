@@ -55,8 +55,16 @@ public static class PackageApplyCommand
         GuardEncoding(pkg, codePage);
 
         using var pathLock = PathMutex.Acquire(wbPath);
-        CheckWritable(wbPath);
+        FileUseDiagnostics.Capture(ui?.Diagnostics, wbPath, "before_open");
+        if (ui == null) CheckWritable(wbPath);
         ui?.Verify(packageBytes, wbPath);
+        using var workingCopy = ui == null ? null : new GuiWorkbookCopy(wbPath, ui.WorkbookHash!, opts.Plan);
+        if (workingCopy != null)
+        {
+            ui!.WorkingWorkbook = workingCopy.WorkPath;
+            ui.OutputWorkbook = workingCopy.OutputPath;
+            ui.Diagnostics?.Write("working_copy_created", new { copyMode = true, outputAllocated = ui.OutputWorkbook != null });
+        }
 
         string storeDir = PackageApplyStore.FolderFor(PackageApplyStore.DefaultRoot, wbPath);
         var record = new ApplyRecord(wbPath, pkgPath, pkg);
@@ -71,6 +79,7 @@ public static class PackageApplyCommand
         }
         catch (COMException ex) when (ComRetry.IsPoison(ex.HResult) || ex.HResult == unchecked((int)0x800706BA))
         {
+            ui?.Diagnostics?.Error("excel_disconnected", ex);
             record.Result = "failed";
             throw new CliError(ui == null
                     ? $"Excel stopped responding or exited during the apply (0x{ex.HResult:X8}) — the workbook was not saved"
@@ -79,8 +88,9 @@ public static class PackageApplyCommand
                     : "Check the workbook and its backup before inspecting again",
                 environment: true, code: "excel_disconnected");
         }
-        catch (InvalidComObjectException)
+        catch (InvalidComObjectException ex)
         {
+            ui?.Diagnostics?.Error("excel_invalid_com_object", ex);
             record.Result = "failed";
             throw new CliError(ui == null ? "Excel connection was lost during the apply — the workbook was not saved"
                     : $"Excel connection was lost; save state: {ui.SaveState}",
@@ -89,13 +99,15 @@ public static class PackageApplyCommand
         }
         catch (CliError e)
         {
+            ui?.Diagnostics?.Error("apply_error", e);
             record.Error ??= e.Message;
             throw;
         }
         finally
         {
+            if (ui != null && ui.SaveState != "not_saved") workingCopy?.PreserveOutput();
             filter.Revoke();
-            if (launch != null) KillIfAlive(launch, log);
+            if (launch != null) KillIfAlive(launch, log, ui?.Diagnostics);
             // --plan은 적용이 아니다 — 이력은 실제 적용 시도(거부 포함)만
             if (record.Result != null && !opts.Plan)
             {
@@ -117,9 +129,10 @@ public static class PackageApplyCommand
         int prevSec = Convert.ToInt32(app.AutomationSecurity);
         app.AutomationSecurity = 1; // msoAutomationSecurityLow — 열기 중 매크로 경고로 멈추지 않게
         dynamic wb;
-        try { wb = WorkbookOpener.Open(app, launch.Pid, wbPath, false, log).Workbook; }
+        string openedPath = ui?.WorkingWorkbook ?? wbPath;
+        try { wb = WorkbookOpener.Open(app, launch.Pid, openedPath, false, log).Workbook; }
         finally { app.AutomationSecurity = prevSec; }
-        ui?.VerifyOpenedWorkbook(wbPath);
+        ui?.VerifyOpenedWorkbook(openedPath);
         if (Convert.ToBoolean(wb.ReadOnly))
             throw new CliError($"Excel opened the workbook read-only: {wbPath}",
                 "Check write-reservation/password, workbook protection, permissions and other programs using the file; no changes were saved",
@@ -150,6 +163,7 @@ public static class PackageApplyCommand
             changedModules = diffs, plan = steps, planErrors = plan.Errors,
             backup, backupFolder = storeDir, applyLog = Path.Combine(storeDir, PackageApplyStore.ApplyLogFileName),
             compile, saved, warnings,
+            outputWorkbook = ui?.OutputWorkbook, copyMode = ui != null,
         };
 
         o.HumanLines.Add($"package: {pkg.Meta.Target} {pkg.Meta.Version} -> {wbPath}");
@@ -209,7 +223,7 @@ public static class PackageApplyCommand
         var slot = BackupStore.Allocate(storeDir, BackupStore.KindPackage, wbPath, DateTime.UtcNow);
         try
         {
-            CopyShared(wbPath, slot.CopyPath);
+            CopyShared(openedPath, slot.CopyPath);
             BackupStore.Complete(slot, new BackupStore.Metadata
             {
                 Command = "push --package",
@@ -279,20 +293,48 @@ public static class PackageApplyCommand
         WriteDocProp(wb, "vbaloop_BuiltAt", pkg.Meta.BuiltAt ?? "");
         WriteDocProp(wb, "vbaloop_PackageSha256", pkg.Sha256);
         WriteDocProp(wb, "vbaloop_AppliedAt", DateTime.UtcNow.ToString("o"));
+        string savePath = ui?.OutputWorkbook ?? wbPath;
+        if (ui != null && !PathDrift.SamePath(Convert.ToString(wb.FullName) ?? "", savePath))
+            throw new CliError("Excel is no longer editing the allocated output copy; save aborted", code: "save_uncertain");
+        FileUseDiagnostics.Capture(ui?.Diagnostics, openedPath, "before_save", launch.Pid);
         ui?.Report("saving");
-        ComRetry.Invoke(() => { wb.Save(); });
+        ui?.Diagnostics?.FileState("workbook_before_save", wbPath);
+        ui?.Diagnostics?.Write("save_enter");
+        try
+        {
+            ui?.Diagnostics?.Write("save_in_place");
+            ComRetry.Invoke(() => { wb.Save(); });
+            if (ui != null && !Convert.ToBoolean(wb.Saved))
+                throw new CliError("Excel has not confirmed the copy was saved", code: "save_uncertain");
+        }
+        catch (COMException ex)
+        {
+            ui?.Diagnostics?.Error("save_error", ex, includeMessage: true);
+            FileUseDiagnostics.Capture(ui?.Diagnostics, savePath, "save_error_before_cleanup", launch.Pid);
+            throw;
+        }
+        ui?.Diagnostics?.Write("save_returned");
         string actual = Convert.ToString(wb.FullName) ?? "";
-        if (!PathDrift.SamePath(actual, wbPath))
+        ui?.Diagnostics?.Write("save_path_checked", new { samePath = PathDrift.SamePath(actual, savePath), extension = Path.GetExtension(actual) });
+        if (!PathDrift.SamePath(actual, savePath))
         {
             o.ErrorCode = "save_uncertain";
             o.Payload = Payload(slot.Id, compilePayload, false);
-            o.Fail($"save drift: Excel saved to {actual} instead of {wbPath} — the original is unchanged; delete the stray copy after checking it",
+            o.Fail($"save drift: Excel saved to {actual} instead of {savePath}; check the output before using it",
                 "Check the file lock and permissions, then retry", environment: true);
             return o;
         }
-        ui?.Report("saved");
+        ui?.Diagnostics?.Write("close_enter");
         ComRetry.Invoke(() => { wb.Close(false); });
-        try { app.Quit(); } catch { /* finally에서 kill */ }
+        ui?.Diagnostics?.Write("close_returned");
+        if (ui != null)
+        {
+            string outputHash = GuiWorkbookCopy.VerifyOutput(savePath);
+            ui.Diagnostics?.Write("output_verified", new { sha256 = outputHash });
+            ui.Report("saved");
+        }
+        try { ui?.Diagnostics?.Write("quit_enter"); app.Quit(); ui?.Diagnostics?.Write("quit_returned"); }
+        catch (Exception ex) { ui?.Diagnostics?.Error("quit_error", ex); /* finally에서 kill */ }
 
         record.Result = verdict.Decision == PackageVerdict.Decision.Reapply ? "reapplied" : "applied";
         record.ToVersion = pkg.Meta.Version;
@@ -514,12 +556,18 @@ public static class PackageApplyCommand
         File.SetLastWriteTimeUtc(dest, File.GetLastWriteTimeUtc(source));
     }
 
-    private static void KillIfAlive(ExcelLauncher.LaunchResult launch, ToolLog log)
+    private static void KillIfAlive(ExcelLauncher.LaunchResult launch, ToolLog log, UpdaterDiagnostics? diagnostics = null)
     {
         // 도구 소유 인스턴스: Quit 후에도 RCW가 남아 종료되지 않으므로 신원이 맞으면 kill(dist 임시 Excel과 같은 처분)
-        if (ProcessIdentity.Identify(launch.Pid, launch.StartTimeIso) != IdentityState.Match) return;
-        try { Process.GetProcessById(launch.Pid).Kill(entireProcessTree: true); }
-        catch (Exception ex) { log.Write("warn", "package_excel_kill_failed", new { pid = launch.Pid, error = ex.Message }); }
+        var identity = ProcessIdentity.Identify(launch.Pid, launch.StartTimeIso);
+        diagnostics?.Write("cleanup_identity", new { launch.Pid, identity = identity.ToString() });
+        if (identity != IdentityState.Match) return;
+        try {
+            diagnostics?.Write("cleanup_kill_enter", new { launch.Pid });
+            Process.GetProcessById(launch.Pid).Kill(entireProcessTree: true);
+            diagnostics?.Write("cleanup_kill_returned");
+        }
+        catch (Exception ex) { diagnostics?.Error("cleanup_kill_error", ex); log.Write("warn", "package_excel_kill_failed", new { pid = launch.Pid, error = ex.Message }); }
     }
 
     /// <summary>apply.jsonl 한 줄(설계 §13.5): 시각, 원래 경로, 버전, 결과, 백업 id.</summary>

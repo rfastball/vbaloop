@@ -27,14 +27,17 @@ public sealed class PackageResponse
     public List<string> Errors { get; set; } = [];
     public string? Hint { get; set; }
     public string SaveState { get; set; } = "unknown";
+    public bool CopyMode { get; set; }
+    public string? OutputWorkbook { get; set; }
     public string? PackageHash { get; set; }
     public string? WorkbookHash { get; set; }
     public PackageInfo? Payload { get; set; }
 
     public bool AlreadyApplied => Ok && Payload?.Decision == "alreadyApplied";
-    public bool CanApply => Ok && SaveState == "not_saved" && Payload?.Decision is "applied" or "reapplied"
+    public bool CanApply => CopyMode && Ok && SaveState == "not_saved" && Payload?.Decision is "applied" or "reapplied"
         && ValidHash(PackageHash) && ValidHash(WorkbookHash);
-    public bool Applied => Ok && SaveState == "saved" && Payload?.Saved == true;
+    public bool Applied => Ok && SaveState == "saved" && Payload?.Saved == true
+        && CopyMode && !string.IsNullOrWhiteSpace(OutputWorkbook) && Path.IsPathFullyQualified(OutputWorkbook);
     private static bool ValidHash(string? hash) => hash?.Length == 64 && hash.All(Uri.IsHexDigit);
 
     public static PackageResponse Parse(string json, int processExitCode)
@@ -46,7 +49,11 @@ public sealed class PackageResponse
         return result;
     }
 
-    public string UserMessage => SaveState == "unknown"
+    public string UserMessage => CopyMode && SaveState == "unknown"
+        ? "결과 사본의 저장을 확인하지 못했습니다. 원본은 변경하지 않았습니다. 결과 파일을 확인하기 전에는 사용하지 마세요."
+        : CopyMode && SaveState == "saved" && !Ok
+        ? "결과 사본은 저장되었지만 마무리 중 문제가 발생했습니다. 원본은 보존되어 있습니다."
+        : SaveState == "unknown"
         ? "저장 결과를 확인할 수 없습니다. 업무 파일과 백업을 확인해 주세요. 자동으로 다시 적용하지 않습니다."
         : SaveState == "saved" && !Ok
         ? "파일은 저장되었지만 마무리 중 문제가 발생했습니다. 업무 파일을 확인해 주세요."
@@ -68,6 +75,7 @@ public sealed class PackageResponse
             "vbom_denied" => "VBA 프로젝트에 접근할 수 없습니다. Excel의 VBA 프로젝트 접근 허용 설정이나 프로젝트 잠금을 확인해 주세요.",
             "compile_failed" => "컴파일 완료를 확인하지 못해 저장하지 않았습니다. 오류 상세를 배포 담당자에게 전달해 주세요.",
             "backup_failed" => "원본 백업을 만들지 못해 중단했습니다. 저장 공간과 폴더 권한을 확인해 주세요.",
+            "output_exists" => "결과 위치에 파일이 이미 있어 중단했습니다. 기존 파일을 덮어쓰지 않았습니다. 다시 검사해 주세요.",
             "encoding_mismatch" => "이 PC에서 저장할 수 없는 문자가 포함되어 있습니다. 배포 담당자에게 확인해 주세요.",
             "incompatible_workbook" => "패키지와 업무 파일의 구성에 차이가 있습니다. 올바른 업무 파일인지 확인해 주세요.",
             "excel_disconnected" => "Excel 연결이 끊겼습니다. 업무 파일을 확인한 뒤 다시 검사해 주세요.",
