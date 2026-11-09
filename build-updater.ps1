@@ -22,6 +22,7 @@ try {
     $output = [IO.Path]::GetFullPath($OutputDirectory, $PSScriptRoot)
     $stage = Join-Path $PSScriptRoot ('artifacts/build/' + [guid]::NewGuid().ToString('N'))
     $cliDir = Join-Path $stage 'cli'
+    $engineDir = Join-Path $stage 'engine'
     $guiDir = Join-Path $stage 'gui'
     New-Item -ItemType Directory -Force -Path $stage, $output | Out-Null
     $common = @('-c', 'Release', '-r', 'win-x64', "-p:Version=$Version", '-p:SelfContained=true',
@@ -31,13 +32,18 @@ try {
     & $DotNet publish src/VbaLoop/VbaLoop.csproj @common -o $cliDir
     if ($LASTEXITCODE -ne 0) { throw 'CLI publish failed' }
     $cli = Join-Path $cliDir 'vbaloop.exe'
-    $hash = (Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash
+    # GUI 안에는 런타임을 중복 내장하지 않는다. CLI는 외부 패키지 의존성이 없는 관리 DLL이다.
+    & $DotNet publish src/VbaLoop/VbaLoop.csproj -c Release -r win-x64 "-p:Version=$Version" `
+        -p:SelfContained=false -p:PublishSingleFile=false -p:UseAppHost=false -p:DebugType=None -o $engineDir
+    if ($LASTEXITCODE -ne 0) { throw 'Embedded engine publish failed' }
+    $engine = Join-Path $engineDir 'vbaloop.dll'
+    $hash = (Get-FileHash -LiteralPath $engine -Algorithm SHA256).Hash
     $manifest = Join-Path $stage 'engine.json'
-    @{ version = $Version; sha256 = $hash; size = (Get-Item -LiteralPath $cli).Length; protocol = 1 } |
+    @{ version = $Version; sha256 = $hash; size = (Get-Item -LiteralPath $engine).Length; protocol = 1 } |
         ConvertTo-Json | Set-Content -LiteralPath $manifest -Encoding utf8
 
     & $DotNet publish src/VbaLoop.Updater/VbaLoop.Updater.csproj @common `
-        "-p:EmbeddedCliPath=$cli" "-p:EmbeddedCliManifestPath=$manifest" -o $guiDir
+        "-p:EmbeddedCliPath=$engine" "-p:EmbeddedCliManifestPath=$manifest" -o $guiDir
     if ($LASTEXITCODE -ne 0) { throw 'GUI publish failed' }
     $gui = Join-Path $guiDir 'vbaloop-updater.exe'
 

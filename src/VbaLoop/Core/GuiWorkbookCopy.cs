@@ -8,12 +8,13 @@ public sealed class GuiWorkbookCopy : IDisposable
     public string WorkPath { get; }
     public string? OutputPath { get; }
     private readonly string _workFolder;
+    private bool _preserveOutput;
 
     public GuiWorkbookCopy(string source, string expectedHash, bool plan, string? root = null)
     {
         root ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "vbaloop");
         string id = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N");
-        _workFolder = Path.Combine(root, "work", id);
+        _workFolder = Path.Combine(root, plan ? "work" : "updated", id);
         WorkPath = Path.Combine(_workFolder, Path.GetFileName(source));
         Directory.CreateDirectory(_workFolder);
         try
@@ -24,21 +25,13 @@ public sealed class GuiWorkbookCopy : IDisposable
                 input.CopyTo(output);
             if (!PackageUiSession.FileHash(WorkPath).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
                 throw new CliError("Workbook changed while making the working copy; inspect again", code: "files_changed");
-            if (!plan)
-            {
-                string folder = Path.Combine(root, "updated", id);
-                Directory.CreateDirectory(folder);
-                OutputPath = Path.Combine(folder, Path.GetFileName(source));
-            }
+            if (!plan) OutputPath = WorkPath;
         }
         catch { Dispose(); throw; }
     }
 
-    public static void RequireNewOutput(string path)
-    {
-        if (File.Exists(path) || Directory.Exists(path))
-            throw new CliError("The output path already exists; no existing file will be replaced", code: "output_exists");
-    }
+    // 저장을 시도한 사본은 결과가 불확실해도 정리하지 않는다.
+    public void PreserveOutput() => _preserveOutput = OutputPath != null;
 
     public static string VerifyOutput(string path)
     {
@@ -49,7 +42,8 @@ public sealed class GuiWorkbookCopy : IDisposable
 
     public void Dispose()
     {
-        // 이 실행이 만든 입력 사본만 정리한다. 결과/원본은 실패해도 삭제하지 않는다.
+        if (_preserveOutput) return;
+        // 검사/저장 전 실패의 사본만 정리한다. 원본은 열거나 삭제하지 않는다.
         try { File.Delete(WorkPath); Directory.Delete(_workFolder, recursive: false); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

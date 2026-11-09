@@ -17,15 +17,15 @@ public sealed class UpdaterTests : IDisposable
     public UpdaterTests() => Directory.CreateDirectory(_root);
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    // Test delta: 원본 교체 금지/스냅샷 검증/결과 경로 격리는 기존 소유자에 2건 추가.
-    // 작은 파일만 사용하고 Excel/프로세스 기동 없이 실패 시 원본 보존 경계를 검증한다.
+    // Test delta: 기존 사본 2건을 결과 위치 직접 저장/저장 시도 후 보존/저장 전 정리로 갱신.
+    // 사례 수와 Excel/프로세스 기동 증가 없이 작은 파일로 원본 보존 경계를 검증한다.
     [Fact]
     public void WorkingCopy_LeavesOriginalUntouched_WithRenameDenyingReader_AndKeepsOutput()
     {
         string source = Path.Combine(_root, "business.xlsb");
         File.WriteAllText(source, "original bytes");
         string hash = PackageUiSession.FileHash(source);
-        string work, output;
+        string work, output, discarded;
         using (var reader = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         using (var copy = new GuiWorkbookCopy(source, hash, false, _root))
         using (var second = new GuiWorkbookCopy(source, hash, false, _root))
@@ -33,18 +33,19 @@ public sealed class UpdaterTests : IDisposable
             work = copy.WorkPath;
             output = copy.OutputPath!;
             Assert.NotEqual(source, work);
-            Assert.NotEqual(work, output);
+            discarded = second.WorkPath;
+            Assert.Equal(work, output);
+            Assert.StartsWith(Path.Combine(_root, "updated") + Path.DirectorySeparatorChar, work);
             Assert.NotEqual(output, second.OutputPath);
             Assert.Equal(".xlsb", Path.GetExtension(work));
             Assert.Equal(hash, PackageUiSession.FileHash(work));
-            GuiWorkbookCopy.RequireNewOutput(output);
-            File.WriteAllText(work, "changed working copy");
-            File.WriteAllText(output, "saved output");
-            Assert.Equal("output_exists", Assert.Throws<CliError>(() => GuiWorkbookCopy.RequireNewOutput(output)).Code);
+            copy.PreserveOutput(); // 저장 성공 여부와 무관하게 저장 시도 이후에는 보존한다.
+            File.WriteAllText(work, "saved output");
             Assert.Equal(PackageUiSession.FileHash(output), GuiWorkbookCopy.VerifyOutput(output));
             Assert.Equal("original bytes", File.ReadAllText(source));
         }
-        Assert.False(File.Exists(work));
+        Assert.True(File.Exists(work));
+        Assert.False(File.Exists(discarded));
         Assert.Equal("saved output", File.ReadAllText(output));
         Assert.Equal(hash, PackageUiSession.FileHash(source));
     }
@@ -55,12 +56,19 @@ public sealed class UpdaterTests : IDisposable
         string source = Path.Combine(_root, "business.xlsm");
         File.WriteAllText(source, "original bytes");
         string hash = PackageUiSession.FileHash(source);
+        string inspectionPath;
         using (var inspect = new GuiWorkbookCopy(source, hash, true, _root))
+        {
+            inspectionPath = inspect.WorkPath;
             Assert.Null(inspect.OutputPath);
+            inspect.PreserveOutput();
+        }
+        Assert.False(File.Exists(inspectionPath));
         Assert.False(Directory.Exists(Path.Combine(_root, "updated")));
         File.WriteAllText(source, "changed since inspection");
         Assert.Equal("files_changed", Assert.Throws<CliError>(() => new GuiWorkbookCopy(source, hash, false, _root)).Code);
         Assert.Empty(Directory.GetDirectories(Path.Combine(_root, "work")));
+        Assert.Empty(Directory.GetDirectories(Path.Combine(_root, "updated")));
         Assert.Equal("changed since inspection", File.ReadAllText(source));
     }
 

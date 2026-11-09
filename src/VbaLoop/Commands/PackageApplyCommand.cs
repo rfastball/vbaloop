@@ -105,6 +105,7 @@ public static class PackageApplyCommand
         }
         finally
         {
+            if (ui != null && ui.SaveState != "not_saved") workingCopy?.PreserveOutput();
             filter.Revoke();
             if (launch != null) KillIfAlive(launch, log, ui?.Diagnostics);
             // --plan은 적용이 아니다 — 이력은 실제 적용 시도(거부 포함)만
@@ -293,22 +294,18 @@ public static class PackageApplyCommand
         WriteDocProp(wb, "vbaloop_PackageSha256", pkg.Sha256);
         WriteDocProp(wb, "vbaloop_AppliedAt", DateTime.UtcNow.ToString("o"));
         string savePath = ui?.OutputWorkbook ?? wbPath;
-        if (ui != null) GuiWorkbookCopy.RequireNewOutput(savePath);
+        if (ui != null && !PathDrift.SamePath(Convert.ToString(wb.FullName) ?? "", savePath))
+            throw new CliError("Excel is no longer editing the allocated output copy; save aborted", code: "save_uncertain");
         FileUseDiagnostics.Capture(ui?.Diagnostics, openedPath, "before_save", launch.Pid);
         ui?.Report("saving");
         ui?.Diagnostics?.FileState("workbook_before_save", wbPath);
         ui?.Diagnostics?.Write("save_enter");
         try
         {
-            if (ui == null) ComRetry.Invoke(() => { wb.Save(); });
-            else
-            {
-                int format = Convert.ToInt32(wb.FileFormat);
-                bool readOnlyRecommended = Convert.ToBoolean(wb.ReadOnlyRecommended);
-                ui.Diagnostics?.Write("save_as_new", new { format });
-                ComRetry.Invoke(() => { GuiWorkbookCopy.RequireNewOutput(savePath); wb.SaveAs(savePath, format, ReadOnlyRecommended: readOnlyRecommended); });
-                if (!Convert.ToBoolean(wb.Saved)) throw new CliError("Excel has not confirmed the copy was saved", code: "save_uncertain");
-            }
+            ui?.Diagnostics?.Write("save_in_place");
+            ComRetry.Invoke(() => { wb.Save(); });
+            if (ui != null && !Convert.ToBoolean(wb.Saved))
+                throw new CliError("Excel has not confirmed the copy was saved", code: "save_uncertain");
         }
         catch (COMException ex)
         {

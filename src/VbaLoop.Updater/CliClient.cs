@@ -50,9 +50,9 @@ public sealed class CliClient
         {
             log.Write("request", new { plan, adopt });
             progress.Report("preparing");
-            var bundle = await Task.Run(() => EngineBundle.Extract());
+            await Task.Run(() => EngineBundle.Extract());
             var args = BuildArguments(package, workbook, plan, adopt, inspection);
-            var result = await ExecuteAsync(bundle.Path, args, progress, folder, log);
+            var result = await ExecuteAsync(Environment.ProcessPath!, args, progress, folder, log);
             var response = PackageResponse.Parse(result.Output, result.ExitCode);
             log.Write("response", new { response.Ok, response.ErrorCode, response.SaveState });
             return response;
@@ -83,6 +83,7 @@ public sealed class CliClient
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
             WorkingDirectory = Path.GetDirectoryName(exe)!,
         };
+        start.ArgumentList.Add("--engine");
         foreach (var arg in args) start.ArgumentList.Add(arg);
         if (diagnosticFolder != null) start.Environment[UpdaterDiagnostics.FolderVariable] = diagnosticFolder;
         using var process = new Process { StartInfo = start };

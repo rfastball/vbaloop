@@ -7,7 +7,7 @@ namespace VbaLoop.Updater;
 
 public sealed record EngineManifest(string Version, string Sha256, long Size, int Protocol);
 
-/// <summary>빌드한 CLI 원본을 내장한다. PATH/설치본을 참조하지 않고 해시별 캐시만 실행한다.</summary>
+/// <summary>런타임 없는 CLI DLL을 내장한다. PATH/설치본을 참조하지 않고 해시별 캐시만 로드한다.</summary>
 public static class EngineBundle
 {
     public static string DefaultCache => Path.Combine(
@@ -20,7 +20,7 @@ public static class EngineBundle
             ?? throw new InvalidOperationException("실행 도구가 내장되지 않은 개발 빌드입니다. build-updater.ps1로 빌드해 주세요.");
         var manifest = JsonSerializer.Deserialize<EngineManifest>(metadata, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidDataException("내장 실행 도구 정보를 읽을 수 없습니다.");
-        using var source = assembly.GetManifestResourceStream("VbaLoop.Updater.Engine.exe")
+        using var source = assembly.GetManifestResourceStream("VbaLoop.Updater.Engine.dll")
             ?? throw new InvalidDataException("내장 실행 도구가 없습니다.");
         return (ExtractVerified(source, manifest, cacheRoot ?? DefaultCache), manifest);
     }
@@ -32,7 +32,7 @@ public static class EngineBundle
         // 해시가 릴리스 버전뿐 아니라 같은 버전의 재빌드까지 구분한다.
         string folder = Path.Combine(cacheRoot, manifest.Sha256.ToLowerInvariant());
         Directory.CreateDirectory(folder);
-        string target = Path.Combine(folder, "vbaloop.exe");
+        string target = Path.Combine(folder, "vbaloop.dll");
         using var mutex = new Mutex(false, @"Local\vbaloop-updater-extract-" + manifest.Sha256[..24]);
         bool held;
         try { held = mutex.WaitOne(TimeSpan.FromSeconds(30)); }
